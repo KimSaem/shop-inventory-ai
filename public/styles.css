@@ -37,6 +37,21 @@ body {
   line-height: 1.4;
 }
 
+body.dark {
+  --bg: #0f172a;
+  --panel: #111827;
+  --panel-subtle: #1f2937;
+  --ink: #f8fafc;
+  --muted: #cbd5e1;
+  --line: #334155;
+  --line-strong: #475569;
+  --blue-soft: #1e3a8a;
+  --green-soft: #064e3b;
+  --red-soft: #7f1d1d;
+  --amber-soft: #78350f;
+  --shadow: 0 14px 34px rgba(0, 0, 0, 0.28);
+}
+
 button,
 input,
 select,
@@ -237,7 +252,7 @@ h2 {
 
 .hero-actions {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(6, minmax(0, 1fr));
   gap: 8px;
 }
 
@@ -424,7 +439,7 @@ textarea:focus {
 
 .stepper {
   display: grid;
-  grid-template-columns: 38px 42px 56px 42px 46px;
+  grid-template-columns: 38px 42px 56px 42px 46px 56px;
 }
 
 .stepper button,
@@ -459,6 +474,13 @@ textarea:focus {
   border-radius: 0 var(--radius) var(--radius) 0;
   color: var(--blue);
   font-size: 15px;
+}
+
+.manage {
+  border-left: 0;
+  border-radius: 0 var(--radius) var(--radius) 0;
+  color: var(--blue);
+  font-size: 13px;
 }
 
 .qty {
@@ -721,7 +743,8 @@ textarea {
   place-items: center;
 }
 
-.order-modal {
+.order-modal,
+.item-modal {
   width: min(1120px, 100%);
   max-height: min(840px, calc(100vh - 36px));
   overflow: hidden;
@@ -729,6 +752,10 @@ textarea {
   border-radius: 12px;
   background: var(--panel);
   box-shadow: 0 28px 80px rgba(15, 23, 42, 0.28);
+}
+
+.item-modal {
+  width: min(680px, 100%);
 }
 
 .modal-head {
@@ -782,6 +809,33 @@ textarea {
   padding: 14px 16px 16px;
   max-height: calc(100vh - 230px);
   overflow: auto;
+}
+
+.item-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  padding: 16px;
+}
+
+.check-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  color: var(--ink);
+  font-weight: 800;
+}
+
+.check-row input {
+  width: auto;
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 0 16px 16px;
 }
 
 .order-list {
@@ -897,7 +951,7 @@ textarea {
   }
 
   .stepper {
-    grid-template-columns: 38px 40px 54px 40px 44px;
+    grid-template-columns: 36px 38px 52px 38px 42px 52px;
   }
 
   .qty {
@@ -930,5 +984,9 @@ textarea {
 
   .order-actions .btn {
     flex: 1 1 100%;
+  }
+
+  .item-form {
+    grid-template-columns: 1fr;
   }
 }

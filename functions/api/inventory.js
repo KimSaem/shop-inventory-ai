@@ -19,6 +19,24 @@ const json = (data, status = 200) => new Response(JSON.stringify(data), {
 
 const todayKey = () => new Date().toISOString().slice(0, 10);
 
+async function ensureSchema(db) {
+  const statements = [
+    "ALTER TABLE items ADD COLUMN supplier TEXT",
+    "ALTER TABLE items ADD COLUMN product_code TEXT",
+    "ALTER TABLE items ADD COLUMN unit TEXT",
+    "ALTER TABLE items ADD COLUMN min_qty INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE items ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0"
+  ];
+
+  for (const statement of statements) {
+    try {
+      await db.prepare(statement).run();
+    } catch (error) {
+      if (!String(error.message || "").includes("duplicate column name")) throw error;
+    }
+  }
+}
+
 async function ensureSeeded(db) {
   for (let categoryIndex = 0; categoryIndex < DEFAULT_DATA.length; categoryIndex += 1) {
     const [categoryName, ...items] = DEFAULT_DATA[categoryIndex];
@@ -50,6 +68,11 @@ async function getCategories(db) {
       i.id AS item_id,
       i.name AS item_name,
       i.current_qty,
+      i.supplier,
+      i.product_code,
+      i.unit,
+      i.min_qty,
+      i.pinned,
       i.sort_order AS item_sort
     FROM categories c
     LEFT JOIN items i ON i.category_id = c.id AND i.active = 1
@@ -74,7 +97,12 @@ async function getCategories(db) {
       byId.get(row.category_id).items.push({
         id: row.item_id,
         name: row.item_name,
-        qty: Number(row.current_qty) || 0
+        qty: Number(row.current_qty) || 0,
+        supplier: row.supplier || row.category_name,
+        productCode: row.product_code || "",
+        unit: row.unit || "",
+        minQty: Number(row.min_qty) || 0,
+        pinned: Boolean(row.pinned)
       });
     }
   }
@@ -232,12 +260,54 @@ async function addItem(db, body) {
   `).bind(categoryId, name, Math.max(0, Number(body.qty) || 0), last.next_order).run();
 }
 
+async function updateItem(db, body) {
+  const id = Number(body.id);
+  const categoryId = Number(body.categoryId);
+  const name = String(body.name || "").trim();
+  if (!id || !categoryId || !name) throw new Error("Item id, category, and name are required");
+
+  await db.prepare(`
+    UPDATE items
+    SET
+      category_id = ?,
+      name = ?,
+      supplier = ?,
+      product_code = ?,
+      unit = ?,
+      min_qty = ?,
+      pinned = ?,
+      updated_at = CURRENT_TIMESTAMP
+    WHERE id = ?
+  `).bind(
+    categoryId,
+    name,
+    String(body.supplier || "").trim() || null,
+    String(body.productCode || "").trim() || null,
+    String(body.unit || "").trim() || null,
+    Math.max(0, Number(body.minQty) || 0),
+    body.pinned ? 1 : 0,
+    id
+  ).run();
+}
+
+async function hideItem(db, body) {
+  const id = Number(body.id);
+  if (!id) throw new Error("Missing item id");
+
+  await db.prepare(`
+    UPDATE items
+    SET active = 0, updated_at = CURRENT_TIMESTAMP
+    WHERE id = ?
+  `).bind(id).run();
+}
+
 export async function onRequest({ request, env }) {
   if (!env.DB) {
     return json({ error: "Cloudflare D1 binding DB is not configured." }, 500);
   }
 
   try {
+    await ensureSchema(env.DB);
     await ensureSeeded(env.DB);
 
     const url = new URL(request.url);
@@ -264,6 +334,16 @@ export async function onRequest({ request, env }) {
 
     if (method === "POST" && url.searchParams.get("action") === "add-item") {
       await addItem(env.DB, body);
+      return json({ ok: true });
+    }
+
+    if (method === "POST" && url.searchParams.get("action") === "update-item") {
+      await updateItem(env.DB, body);
+      return json({ ok: true });
+    }
+
+    if (method === "POST" && url.searchParams.get("action") === "hide-item") {
+      await hideItem(env.DB, body);
       return json({ ok: true });
     }
 

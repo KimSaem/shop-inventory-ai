@@ -1,6 +1,7 @@
 const API_URL = "/api/inventory";
 const LOCAL_KEY = "shop-inventory-ai-local-v2";
 const ACTIVITY_KEY = "shop-inventory-ai-activity-v1";
+const THEME_KEY = "shop-inventory-ai-theme-v1";
 
 const DEFAULT_CATEGORIES = [
   { id: 1, name: "튀김 / 냉동", items: [["만두", 1], ["탬프라", 2], ["스프링롤", 0], ["타코야끼", 0], ["새우", 6], ["포크 돈까스", 1], ["프론 트위스트", 0], ["프론 슈마이", 1], ["피쉬", 0], ["핫도그", 0], ["손가락치킨", 1], ["크랩볼", 0], ["오징어", 1], ["스시 튀김", 0], ["라이스볼", 0]] },
@@ -24,6 +25,7 @@ const state = {
   orderOnly: false,
   selectedCategory: "all",
   selectedOrderGroup: "all",
+  editingItemId: null,
   activities: [],
   history: [],
   saving: false
@@ -46,6 +48,14 @@ const elements = {
   orderCenterContent: $("orderCenterContent"),
   orderCenterPreview: $("orderCenterPreview"),
   orderCenterSummary: $("orderCenterSummary"),
+  itemModal: $("itemModal"),
+  editItemName: $("editItemName"),
+  editItemCategory: $("editItemCategory"),
+  editItemSupplier: $("editItemSupplier"),
+  editItemCode: $("editItemCode"),
+  editItemUnit: $("editItemUnit"),
+  editItemMinQty: $("editItemMinQty"),
+  editItemPinned: $("editItemPinned"),
   orderItemCount: $("orderItemCount"),
   orderUnitCount: $("orderUnitCount"),
   confidenceText: $("confidenceText"),
@@ -115,6 +125,15 @@ function readActivities() {
 
 function writeActivities() {
   localStorage.setItem(ACTIVITY_KEY, JSON.stringify(state.activities.slice(0, 12)));
+}
+
+function setTheme(theme) {
+  document.body.classList.toggle("dark", theme === "dark");
+  localStorage.setItem(THEME_KEY, theme);
+}
+
+function loadTheme() {
+  setTheme(localStorage.getItem(THEME_KEY) || "light");
 }
 
 function logActivity(message) {
@@ -401,11 +420,17 @@ function renderCategoryControls() {
   elements.categoryFilter.value = current;
 
   elements.newItemCategory.innerHTML = "";
+  elements.editItemCategory.innerHTML = "";
   for (const category of state.categories) {
     const option = document.createElement("option");
     option.value = String(category.id);
     option.textContent = category.name;
     elements.newItemCategory.append(option);
+
+    const editOption = document.createElement("option");
+    editOption.value = String(category.id);
+    editOption.textContent = category.name;
+    elements.editItemCategory.append(editOption);
   }
 }
 
@@ -599,7 +624,11 @@ function renderInventory() {
       name.textContent = item.name;
       const meta = document.createElement("div");
       meta.className = "item-meta";
-      meta.textContent = prediction ? prediction.reason : "예측 대기";
+      const metaParts = [prediction ? prediction.reason : "예측 대기"];
+      if (item.productCode) metaParts.push(`코드 ${item.productCode}`);
+      if (item.unit) metaParts.push(item.unit);
+      if (item.minQty) metaParts.push(`최소 ${item.minQty}`);
+      meta.textContent = metaParts.join(" · ");
       main.append(name, meta);
 
       const pill = document.createElement("button");
@@ -618,6 +647,7 @@ function renderInventory() {
         <input class="qty" type="number" min="0" inputmode="numeric" value="${item.qty}" data-action="qty" aria-label="${item.name} 수량" />
         <button class="plus" type="button" data-action="plus" aria-label="${item.name} 늘리기">+</button>
         <button class="plus-five" type="button" data-action="plus-five" aria-label="${item.name} 5개 늘리기">+5</button>
+        <button class="manage" type="button" data-action="manage" aria-label="${item.name} 관리">관리</button>
       `;
 
       row.append(main, pill, stepper);
@@ -961,6 +991,110 @@ function closeOrderCenter() {
   elements.orderModal.setAttribute("aria-hidden", "true");
 }
 
+function findItemWithCategory(itemId) {
+  for (const category of state.categories) {
+    const item = category.items.find((entry) => Number(entry.id) === Number(itemId));
+    if (item) return { item, category };
+  }
+  return null;
+}
+
+function openItemModal(itemId) {
+  const found = findItemWithCategory(itemId);
+  if (!found) return;
+
+  state.editingItemId = itemId;
+  elements.editItemName.value = found.item.name || "";
+  elements.editItemCategory.value = String(found.category.id);
+  elements.editItemSupplier.value = found.item.supplier || found.category.name || "";
+  elements.editItemCode.value = found.item.productCode || "";
+  elements.editItemUnit.value = found.item.unit || "";
+  elements.editItemMinQty.value = found.item.minQty || "";
+  elements.editItemPinned.checked = Boolean(found.item.pinned);
+  elements.itemModal.classList.add("open");
+  elements.itemModal.setAttribute("aria-hidden", "false");
+}
+
+function closeItemModal() {
+  elements.itemModal.classList.remove("open");
+  elements.itemModal.setAttribute("aria-hidden", "true");
+  state.editingItemId = null;
+}
+
+async function saveItemDetails() {
+  const found = findItemWithCategory(state.editingItemId);
+  if (!found) return;
+
+  const payload = {
+    id: found.item.id,
+    name: normalizeName(elements.editItemName.value),
+    categoryId: Number(elements.editItemCategory.value),
+    supplier: normalizeName(elements.editItemSupplier.value),
+    productCode: normalizeName(elements.editItemCode.value),
+    unit: normalizeName(elements.editItemUnit.value),
+    minQty: Math.max(0, Number(elements.editItemMinQty.value) || 0),
+    pinned: elements.editItemPinned.checked
+  };
+
+  if (!payload.name) {
+    showToast("품목 이름을 입력하세요");
+    return;
+  }
+
+  pushHistory("품목 관리 저장");
+
+  found.category.items = found.category.items.filter((item) => Number(item.id) !== Number(payload.id));
+  const nextCategory = findCategory(payload.categoryId) || found.category;
+  nextCategory.items.push({
+    ...found.item,
+    name: payload.name,
+    supplier: payload.supplier,
+    productCode: payload.productCode,
+    unit: payload.unit,
+    minQty: payload.minQty,
+    pinned: payload.pinned
+  });
+
+  if (state.online) {
+    await api("?action=update-item", {
+      method: "POST",
+      body: JSON.stringify(payload)
+    });
+    await loadData();
+  } else {
+    writeLocalStore();
+    render();
+  }
+
+  closeItemModal();
+  logActivity(`${payload.name} 품목 정보 저장`);
+  showToast("품목 정보를 저장했습니다");
+}
+
+async function hideCurrentItem() {
+  const found = findItemWithCategory(state.editingItemId);
+  if (!found) return;
+
+  if (!confirm(`${found.item.name} 품목을 숨길까요?`)) return;
+  pushHistory("품목 숨김");
+  found.category.items = found.category.items.filter((item) => Number(item.id) !== Number(found.item.id));
+
+  if (state.online) {
+    await api("?action=hide-item", {
+      method: "POST",
+      body: JSON.stringify({ id: found.item.id })
+    });
+    await loadData();
+  } else {
+    writeLocalStore();
+    render();
+  }
+
+  closeItemModal();
+  logActivity(`${found.item.name} 품목 숨김`);
+  showToast("품목을 숨겼습니다");
+}
+
 async function zeroAll() {
   if (!confirm("전체 수량을 0으로 바꿀까요?")) return;
   pushHistory("전체 0으로");
@@ -1038,6 +1172,12 @@ function bindEvents() {
   $("openOrderCenterBtn").addEventListener("click", openOrderCenter);
   $("bottomOrderCenterBtn").addEventListener("click", openOrderCenter);
   $("closeOrderCenterBtn").addEventListener("click", closeOrderCenter);
+  $("closeItemModalBtn").addEventListener("click", closeItemModal);
+  $("saveItemBtn").addEventListener("click", () => saveItemDetails().catch((error) => showToast(error.message)));
+  $("hideItemBtn").addEventListener("click", () => hideCurrentItem().catch((error) => showToast(error.message)));
+  $("themeToggleBtn").addEventListener("click", () => {
+    setTheme(document.body.classList.contains("dark") ? "light" : "dark");
+  });
   $("copyOrderCenterBtn").addEventListener("click", () => copyOrderCenter().catch((error) => showToast(error.message)));
   $("downloadOrderCenterBtn").addEventListener("click", downloadOrderCenterCsv);
   $("completeOrderBtn").addEventListener("click", () => completeOrder().catch((error) => showToast(error.message)));
@@ -1068,9 +1208,16 @@ function bindEvents() {
     if (event.target === elements.orderModal) closeOrderCenter();
   });
 
+  elements.itemModal.addEventListener("click", (event) => {
+    if (event.target === elements.itemModal) closeItemModal();
+  });
+
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape" && elements.orderModal.classList.contains("open")) {
       closeOrderCenter();
+    }
+    if (event.key === "Escape" && elements.itemModal.classList.contains("open")) {
+      closeItemModal();
     }
   });
 
@@ -1103,6 +1250,11 @@ function bindEvents() {
       return;
     }
 
+    if (button.dataset.action === "manage") {
+      openItemModal(itemId);
+      return;
+    }
+
     const nextQty = button.dataset.action === "zero"
       ? 0
       : button.dataset.action === "plus-five"
@@ -1128,4 +1280,5 @@ function bindEvents() {
 
 bindEvents();
 state.activities = readActivities();
+loadTheme();
 loadData();
