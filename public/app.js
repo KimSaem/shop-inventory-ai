@@ -8,7 +8,7 @@ const DEFAULT_CATEGORIES = [
   { id: 4, name: "야채 / 과일", items: [["오이", 2], ["피망", 0], ["상추", 0], ["양배추", 0], ["바나나", 0], ["바나나 스프링", 0], ["아보카도", 5]] },
   { id: 5, name: "치킨 / 돈부리", items: [["치킨 돈부리", 1], ["코리안 치킨", 0], ["치킨 윙", 1]] },
   { id: 6, name: "포장 / 기타", items: [["브라운 컨테이너", 0]] },
-  { id: 7, name: "비드푸드", items: [["새우꼬지", 1], ["바오번", 0], ["크림치즈", 0], ["딤섬", 1], ["치킨케밥", 0], ["치킨 슈마이", 0]] },
+  { id: 7, name: "비드푸드", items: [["새우꼬지", 1], ["바오번", 0], ["크림치즈", 0], ["딤섬", 1], ["치킨케밥", 0], ["치킨 슈마이", 0], ["BBQ SAUCE", 0], ["Sweet Chilli Sauce", 0], ["Thousand SAUCE (SEAFOOD SAUCE)", 0], ["ETA FREE MAYO", 0], ["KIWI MAYO", 0], ["FILTER Fat Cone 11 inch", 0], ["Scale Paper Waxed", 0], ["Chocolate Buttons Compound Milk", 0], ["Drink Creaming Soda Bottle (Bundaberg)", 0], ["Drink Dekopon Mandarin (Bundaberg)", 0], ["Drink Ginger Beer Diet (Bundaberg)", 0], ["Sauce Oyster KUM CHUN", 0], ["Chip 13mm ure crisp (Mc Cain)", 0], ["Drink Guava", 0], ["Drink Lemonade", 0], ["Drink Passionfurit", 0], ["Drink Peach", 0], ["Drink Pineapple Coconut", 0], ["Drink Tropical Mango", 0], ["Egg Grade 7 Cage Free Barn", 0]] },
   { id: 8, name: "음료수", items: [["콜라", 0], ["콜라 제로", 0], ["스프라이트", 0], ["환타", 0], ["물", 0], ["주스", 0], ["아이스티", 0], ["캔음료", 0], ["병음료", 0]] }
 ];
 
@@ -226,6 +226,23 @@ function formatMessage() {
   }
 
   return sections.length ? sections.join("\n\n") : "주문할 품목 없음";
+}
+
+function getBidfoodItems() {
+  const category = state.categories.find((entry) => entry.name === "비드푸드");
+  if (!category) return [];
+
+  return category.items
+    .filter((item) => Number(item.qty) > 0)
+    .map((item) => ({
+      name: item.name,
+      qty: Number(item.qty) || 0
+    }));
+}
+
+function formatBidfoodOrder() {
+  const lines = getBidfoodItems().map((item) => `${item.name} ${item.qty}`);
+  return lines.length ? `[비드푸드 발주]\n${lines.join("\n")}` : "비드푸드 발주 품목 없음";
 }
 
 function updatePreview() {
@@ -605,6 +622,19 @@ async function copyMessage() {
   showToast("복사했습니다");
 }
 
+async function copyBidfoodOrder() {
+  const text = formatBidfoodOrder();
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch (error) {
+    elements.messageOutput.value = text;
+    elements.messageOutput.select();
+    document.execCommand("copy");
+    updatePreview();
+  }
+  showToast("비드푸드 발주 내용을 복사했습니다");
+}
+
 async function shareMessage() {
   const text = formatMessage();
   if (navigator.share) {
@@ -636,6 +666,23 @@ function downloadBackup() {
   link.remove();
   URL.revokeObjectURL(url);
   showToast("백업 파일을 만들었습니다");
+}
+
+function downloadBidfoodCsv() {
+  const rows = [["Item", "Quantity"], ...getBidfoodItems().map((item) => [item.name, item.qty])];
+  const csv = rows
+    .map((row) => row.map((cell) => `"${String(cell).replaceAll('"', '""')}"`).join(","))
+    .join("\n");
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = "bidfood-order.csv";
+  document.body.append(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+  showToast("비드푸드 CSV를 만들었습니다");
 }
 
 async function zeroAll() {
@@ -693,6 +740,8 @@ function bindEvents() {
   $("applyPredictBtn").addEventListener("click", () => applyPrediction().catch((error) => showToast(error.message)));
   $("addItemBtn").addEventListener("click", () => addItem().catch((error) => showToast(error.message)));
   $("downloadBtn").addEventListener("click", downloadBackup);
+  $("copyBidfoodBtn").addEventListener("click", copyBidfoodOrder);
+  $("downloadBidfoodBtn").addEventListener("click", downloadBidfoodCsv);
   $("zeroAllBtn").addEventListener("click", () => zeroAll().catch((error) => showToast(error.message)));
   $("restoreBtn").addEventListener("click", restoreDefaults);
   $("undoBtn").addEventListener("click", undoLastChange);

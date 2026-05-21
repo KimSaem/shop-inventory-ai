@@ -5,7 +5,7 @@ const DEFAULT_DATA = [
   ["야채 / 과일", ["오이", 2], ["피망", 0], ["상추", 0], ["양배추", 0], ["바나나", 0], ["바나나 스프링", 0], ["아보카도", 5]],
   ["치킨 / 돈부리", ["치킨 돈부리", 1], ["코리안 치킨", 0], ["치킨 윙", 1]],
   ["포장 / 기타", ["브라운 컨테이너", 0]],
-  ["비드푸드", ["새우꼬지", 1], ["바오번", 0], ["크림치즈", 0], ["딤섬", 1], ["치킨케밥", 0], ["치킨 슈마이", 0]],
+  ["비드푸드", ["새우꼬지", 1], ["바오번", 0], ["크림치즈", 0], ["딤섬", 1], ["치킨케밥", 0], ["치킨 슈마이", 0], ["BBQ SAUCE", 0], ["Sweet Chilli Sauce", 0], ["Thousand SAUCE (SEAFOOD SAUCE)", 0], ["ETA FREE MAYO", 0], ["KIWI MAYO", 0], ["FILTER Fat Cone 11 inch", 0], ["Scale Paper Waxed", 0], ["Chocolate Buttons Compound Milk", 0], ["Drink Creaming Soda Bottle (Bundaberg)", 0], ["Drink Dekopon Mandarin (Bundaberg)", 0], ["Drink Ginger Beer Diet (Bundaberg)", 0], ["Sauce Oyster KUM CHUN", 0], ["Chip 13mm ure crisp (Mc Cain)", 0], ["Drink Guava", 0], ["Drink Lemonade", 0], ["Drink Passionfurit", 0], ["Drink Peach", 0], ["Drink Pineapple Coconut", 0], ["Drink Tropical Mango", 0], ["Egg Grade 7 Cage Free Barn", 0]],
   ["음료수", ["콜라", 0], ["콜라 제로", 0], ["스프라이트", 0], ["환타", 0], ["물", 0], ["주스", 0], ["아이스티", 0], ["캔음료", 0], ["병음료", 0]]
 ];
 
@@ -20,9 +20,6 @@ const json = (data, status = 200) => new Response(JSON.stringify(data), {
 const todayKey = () => new Date().toISOString().slice(0, 10);
 
 async function ensureSeeded(db) {
-  const existing = await db.prepare("SELECT COUNT(*) AS count FROM categories").first();
-  if (existing && existing.count > 0) return;
-
   for (let categoryIndex = 0; categoryIndex < DEFAULT_DATA.length; categoryIndex += 1) {
     const [categoryName, ...items] = DEFAULT_DATA[categoryIndex];
     await db.prepare("INSERT OR IGNORE INTO categories (name, sort_order) VALUES (?, ?)")
@@ -36,8 +33,9 @@ async function ensureSeeded(db) {
     for (let itemIndex = 0; itemIndex < items.length; itemIndex += 1) {
       const [itemName, qty] = items[itemIndex];
       await db.prepare(`
-        INSERT OR IGNORE INTO items (category_id, name, current_qty, sort_order)
+        INSERT INTO items (category_id, name, current_qty, sort_order)
         VALUES (?, ?, ?, ?)
+        ON CONFLICT(category_id, name) DO UPDATE SET active = 1
       `).bind(category.id, itemName, qty, itemIndex).run();
     }
   }

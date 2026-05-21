@@ -473,6 +473,13 @@ textarea:focus {
   margin-bottom: 10px;
 }
 
+.panel-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
 .small-pill {
   background: var(--blue-soft);
   color: var(--blue);
