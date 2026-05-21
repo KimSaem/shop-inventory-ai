@@ -105,6 +105,17 @@
           <div class="activity-list" id="activityList"></div>
         </section>
 
+        <section class="panel history-panel">
+          <div class="panel-head">
+            <div>
+              <h2>발주 기록</h2>
+              <p>완료한 발주를 다시 확인하고 복사합니다.</p>
+            </div>
+            <button class="btn small" id="clearOrderHistoryBtn" type="button">지우기</button>
+          </div>
+          <div class="history-list" id="orderHistoryList"></div>
+        </section>
+
         <section class="panel">
           <div class="panel-head">
             <div>
@@ -126,6 +137,8 @@
               <button class="btn small" id="copyBidfoodBtn" type="button">비드푸드 복사</button>
               <button class="btn small" id="downloadBidfoodBtn" type="button">비드푸드 CSV</button>
               <button class="btn small" id="downloadBtn" type="button">백업</button>
+              <button class="btn small" id="restoreBackupBtn" type="button">복원</button>
+              <input id="restoreBackupInput" type="file" accept="application/json" hidden />
             </div>
           </div>
           <textarea id="messageOutput" readonly></textarea>

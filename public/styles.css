@@ -588,12 +588,14 @@ textarea:focus {
   border-color: #dbe3ee;
 }
 
-.activity-list {
+.activity-list,
+.history-list {
   display: grid;
   gap: 8px;
 }
 
-.activity-row {
+.activity-row,
+.history-row {
   display: grid;
   grid-template-columns: 52px minmax(0, 1fr);
   gap: 8px;
@@ -610,6 +612,31 @@ textarea:focus {
 .activity-row strong {
   color: var(--muted);
   font-size: 12px;
+}
+
+.history-panel {
+  border-color: #c7d2fe;
+}
+
+.history-row {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+}
+
+.history-row strong,
+.history-row span {
+  display: block;
+}
+
+.history-row strong {
+  font-weight: 900;
+}
+
+.history-row span {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 750;
 }
 
 .recommendation-list {

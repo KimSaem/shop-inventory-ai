@@ -2,6 +2,7 @@ const API_URL = "/api/inventory";
 const LOCAL_KEY = "shop-inventory-ai-local-v2";
 const ACTIVITY_KEY = "shop-inventory-ai-activity-v1";
 const THEME_KEY = "shop-inventory-ai-theme-v1";
+const ORDER_HISTORY_KEY = "shop-inventory-ai-order-history-v1";
 
 const DEFAULT_CATEGORIES = [
   { id: 1, name: "튀김 / 냉동", items: [["만두", 1], ["탬프라", 2], ["스프링롤", 0], ["타코야끼", 0], ["새우", 6], ["포크 돈까스", 1], ["프론 트위스트", 0], ["프론 슈마이", 1], ["피쉬", 0], ["핫도그", 0], ["손가락치킨", 1], ["크랩볼", 0], ["오징어", 1], ["스시 튀김", 0], ["라이스볼", 0]] },
@@ -27,6 +28,7 @@ const state = {
   selectedOrderGroup: "all",
   editingItemId: null,
   activities: [],
+  orderHistory: [],
   history: [],
   saving: false
 };
@@ -43,6 +45,7 @@ const elements = {
   bidfoodOrderCount: $("bidfoodOrderCount"),
   reviewList: $("reviewList"),
   activityList: $("activityList"),
+  orderHistoryList: $("orderHistoryList"),
   orderModal: $("orderModal"),
   orderSupplierTabs: $("orderSupplierTabs"),
   orderCenterContent: $("orderCenterContent"),
@@ -71,6 +74,7 @@ const elements = {
   newItemName: $("newItemName"),
   newItemCategory: $("newItemCategory"),
   messageOutput: $("messageOutput"),
+  restoreBackupInput: $("restoreBackupInput"),
   toast: $("toast")
 };
 
@@ -125,6 +129,36 @@ function readActivities() {
 
 function writeActivities() {
   localStorage.setItem(ACTIVITY_KEY, JSON.stringify(state.activities.slice(0, 12)));
+}
+
+function readOrderHistory() {
+  try {
+    const data = JSON.parse(localStorage.getItem(ORDER_HISTORY_KEY));
+    return Array.isArray(data) ? data.slice(0, 20) : [];
+  } catch (error) {
+    localStorage.removeItem(ORDER_HISTORY_KEY);
+    return [];
+  }
+}
+
+function writeOrderHistory() {
+  localStorage.setItem(ORDER_HISTORY_KEY, JSON.stringify(state.orderHistory.slice(0, 20)));
+}
+
+function addOrderHistory(group) {
+  const stamp = new Date();
+  state.orderHistory.unshift({
+    id: stamp.toISOString(),
+    date: stamp.toLocaleString("ko-NZ", { dateStyle: "short", timeStyle: "short" }),
+    name: group.name,
+    itemCount: group.items.length,
+    totalQty: group.items.reduce((sum, item) => sum + Number(item.qty || 0), 0),
+    text: formatOrderGroup(group),
+    items: group.items
+  });
+  state.orderHistory = state.orderHistory.slice(0, 20);
+  writeOrderHistory();
+  renderOrderHistory();
 }
 
 function setTheme(theme) {
@@ -277,6 +311,9 @@ function getTodayKey() {
 function buildReviewItems() {
   const summary = getOrderSummary();
   const bidfoodCount = getBidfoodItems().length;
+  const activeItems = getAllItems().filter((item) => Number(item.qty) > 0);
+  const belowMin = activeItems.filter((item) => Number(item.minQty) > 0 && Number(item.qty) < Number(item.minQty));
+  const highQty = activeItems.filter((item) => Number(item.qty) >= 10);
   const today = getTodayKey();
   const items = [];
 
@@ -303,6 +340,22 @@ function buildReviewItems() {
     icon: bidfoodCount ? "✓" : "!",
     text: bidfoodCount ? `비드푸드 발주 품목 ${bidfoodCount}개가 준비되었습니다.` : "비드푸드 발주 품목은 아직 없습니다."
   });
+
+  if (belowMin.length) {
+    items.push({
+      status: "warn",
+      icon: "!",
+      text: `최소 주문 수량보다 적은 품목 ${belowMin.length}개가 있습니다.`
+    });
+  }
+
+  if (highQty.length) {
+    items.push({
+      status: "warn",
+      icon: "!",
+      text: `수량 10 이상 품목 ${highQty.length}개를 발주 전 확인하세요.`
+    });
+  }
 
   return items;
 }
@@ -490,6 +543,39 @@ function renderActivity() {
   }
 }
 
+function renderOrderHistory() {
+  elements.orderHistoryList.innerHTML = "";
+
+  if (!state.orderHistory.length) {
+    const empty = document.createElement("div");
+    empty.className = "empty-state";
+    empty.textContent = "아직 완료한 발주 기록이 없습니다.";
+    elements.orderHistoryList.append(empty);
+    return;
+  }
+
+  for (const entry of state.orderHistory.slice(0, 6)) {
+    const row = document.createElement("div");
+    row.className = "history-row";
+
+    const copy = document.createElement("div");
+    const title = document.createElement("strong");
+    title.textContent = entry.name;
+    const meta = document.createElement("span");
+    meta.textContent = `${entry.date} · ${entry.itemCount}개 품목 · 총 ${entry.totalQty}개`;
+    copy.append(title, meta);
+
+    const button = document.createElement("button");
+    button.className = "btn small";
+    button.type = "button";
+    button.dataset.historyCopy = entry.id;
+    button.textContent = "복사";
+
+    row.append(copy, button);
+    elements.orderHistoryList.append(row);
+  }
+}
+
 function renderRecommendations() {
   elements.recommendationList.innerHTML = "";
   const recommended = state.predictions
@@ -670,6 +756,7 @@ function render() {
   renderMetrics();
   renderReview();
   renderActivity();
+  renderOrderHistory();
   renderRecommendations();
   renderInventory();
   renderOrderCenter();
@@ -906,7 +993,9 @@ function downloadBackup() {
     online: state.online,
     categories: state.categories,
     records: state.records,
-    predictions: state.predictions
+    predictions: state.predictions,
+    activities: state.activities,
+    orderHistory: state.orderHistory
   };
   const blob = new Blob([JSON.stringify(backup, null, 2)], { type: "application/json" });
   const url = URL.createObjectURL(blob);
@@ -918,6 +1007,37 @@ function downloadBackup() {
   link.remove();
   URL.revokeObjectURL(url);
   showToast("백업 파일을 만들었습니다");
+}
+
+function restoreBackupFile(file) {
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      const data = JSON.parse(String(reader.result || ""));
+      if (!Array.isArray(data.categories)) throw new Error("Invalid backup");
+
+      pushHistory("백업 복원");
+      state.categories = data.categories;
+      state.records = Array.isArray(data.records) ? data.records : [];
+      state.activities = Array.isArray(data.activities) ? data.activities : state.activities;
+      state.orderHistory = Array.isArray(data.orderHistory) ? data.orderHistory : state.orderHistory;
+      state.predictions = state.online ? state.predictions : buildLocalPredictions();
+      state.recordsCount = state.records.length;
+      state.lastRecordDate = state.records.length ? state.records[state.records.length - 1].date : state.lastRecordDate;
+      writeLocalStore();
+      writeActivities();
+      writeOrderHistory();
+      render();
+      logActivity("백업 데이터 복원");
+      showToast("백업을 복원했습니다");
+    } catch (error) {
+      showToast("백업 파일을 읽지 못했습니다");
+    } finally {
+      elements.restoreBackupInput.value = "";
+    }
+  };
+  reader.readAsText(file);
 }
 
 function downloadBidfoodCsv() {
@@ -970,13 +1090,15 @@ function downloadOrderCenterCsv() {
 }
 
 async function completeOrder() {
-  if (!getSelectedOrderGroup().items.length) {
+  const group = getSelectedOrderGroup();
+  if (!group.items.length) {
     showToast("완료 기록할 발주 품목이 없습니다");
     return;
   }
+  addOrderHistory(group);
   await saveRecord();
   showToast("발주 완료 기록을 저장했습니다");
-  logActivity(`${getSelectedOrderGroup().name} 발주 완료 기록`);
+  logActivity(`${group.name} 발주 완료 기록`);
 }
 
 function openOrderCenter() {
@@ -1166,6 +1288,8 @@ function bindEvents() {
   $("applyPredictBtn").addEventListener("click", () => applyPrediction().catch((error) => showToast(error.message)));
   $("addItemBtn").addEventListener("click", () => addItem().catch((error) => showToast(error.message)));
   $("downloadBtn").addEventListener("click", downloadBackup);
+  $("restoreBackupBtn").addEventListener("click", () => elements.restoreBackupInput.click());
+  elements.restoreBackupInput.addEventListener("change", (event) => restoreBackupFile(event.target.files[0]));
   $("copyBidfoodBtn").addEventListener("click", copyBidfoodOrder);
   $("downloadBidfoodBtn").addEventListener("click", downloadBidfoodCsv);
   $("showBidfoodBtn").addEventListener("click", showBidfoodOnly);
@@ -1189,6 +1313,11 @@ function bindEvents() {
     writeActivities();
     renderActivity();
   });
+  $("clearOrderHistoryBtn").addEventListener("click", () => {
+    state.orderHistory = [];
+    writeOrderHistory();
+    renderOrderHistory();
+  });
 
   elements.searchInput.addEventListener("input", render);
   elements.categoryFilter.addEventListener("change", (event) => setSelectedCategory(event.target.value));
@@ -1202,6 +1331,15 @@ function bindEvents() {
     if (!tab) return;
     state.selectedOrderGroup = tab.dataset.orderGroup;
     renderOrderCenter();
+  });
+
+  elements.orderHistoryList.addEventListener("click", async (event) => {
+    const button = event.target.closest("[data-history-copy]");
+    if (!button) return;
+    const entry = state.orderHistory.find((item) => item.id === button.dataset.historyCopy);
+    if (!entry) return;
+    await navigator.clipboard.writeText(entry.text);
+    showToast("발주 기록을 복사했습니다");
   });
 
   elements.orderModal.addEventListener("click", (event) => {
@@ -1280,5 +1418,6 @@ function bindEvents() {
 
 bindEvents();
 state.activities = readActivities();
+state.orderHistory = readOrderHistory();
 loadTheme();
 loadData();
