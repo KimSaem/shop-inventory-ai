@@ -1,5 +1,6 @@
 const API_URL = "/api/inventory";
 const LOCAL_KEY = "shop-inventory-ai-local-v2";
+const ACTIVITY_KEY = "shop-inventory-ai-activity-v1";
 
 const DEFAULT_CATEGORIES = [
   { id: 1, name: "튀김 / 냉동", items: [["만두", 1], ["탬프라", 2], ["스프링롤", 0], ["타코야끼", 0], ["새우", 6], ["포크 돈까스", 1], ["프론 트위스트", 0], ["프론 슈마이", 1], ["피쉬", 0], ["핫도그", 0], ["손가락치킨", 1], ["크랩볼", 0], ["오징어", 1], ["스시 튀김", 0], ["라이스볼", 0]] },
@@ -20,8 +21,10 @@ const state = {
   lastRecordDate: null,
   online: true,
   hideZero: true,
+  orderOnly: false,
   selectedCategory: "all",
   selectedOrderGroup: "all",
+  activities: [],
   history: [],
   saving: false
 };
@@ -37,6 +40,7 @@ const elements = {
   issueCount: $("issueCount"),
   bidfoodOrderCount: $("bidfoodOrderCount"),
   reviewList: $("reviewList"),
+  activityList: $("activityList"),
   orderModal: $("orderModal"),
   orderSupplierTabs: $("orderSupplierTabs"),
   orderCenterContent: $("orderCenterContent"),
@@ -52,6 +56,7 @@ const elements = {
   categoryFilter: $("categoryFilter"),
   searchInput: $("searchInput"),
   toggleZeroBtn: $("toggleZeroBtn"),
+  orderOnlyBtn: $("orderOnlyBtn"),
   undoBtn: $("undoBtn"),
   newItemName: $("newItemName"),
   newItemCategory: $("newItemCategory"),
@@ -96,6 +101,28 @@ function writeLocalStore() {
     records: state.records,
     lastRecordDate: state.lastRecordDate
   }));
+}
+
+function readActivities() {
+  try {
+    const data = JSON.parse(localStorage.getItem(ACTIVITY_KEY));
+    return Array.isArray(data) ? data.slice(0, 12) : [];
+  } catch (error) {
+    localStorage.removeItem(ACTIVITY_KEY);
+    return [];
+  }
+}
+
+function writeActivities() {
+  localStorage.setItem(ACTIVITY_KEY, JSON.stringify(state.activities.slice(0, 12)));
+}
+
+function logActivity(message) {
+  const time = new Date().toLocaleTimeString("ko-NZ", { hour: "2-digit", minute: "2-digit" });
+  state.activities.unshift({ time, message });
+  state.activities = state.activities.slice(0, 12);
+  writeActivities();
+  renderActivity();
 }
 
 function setSaving(isSaving) {
@@ -415,6 +442,29 @@ function renderReview() {
   }
 }
 
+function renderActivity() {
+  elements.activityList.innerHTML = "";
+
+  if (!state.activities.length) {
+    const empty = document.createElement("div");
+    empty.className = "empty-state";
+    empty.textContent = "아직 기록된 작업이 없습니다.";
+    elements.activityList.append(empty);
+    return;
+  }
+
+  for (const item of state.activities.slice(0, 8)) {
+    const row = document.createElement("div");
+    row.className = "activity-row";
+    const time = document.createElement("strong");
+    time.textContent = item.time;
+    const message = document.createElement("span");
+    message.textContent = item.message;
+    row.append(time, message);
+    elements.activityList.append(row);
+  }
+}
+
 function renderRecommendations() {
   elements.recommendationList.innerHTML = "";
   const recommended = state.predictions
@@ -516,7 +566,8 @@ function renderInventory() {
     const visibleItems = category.items.filter((item) => {
       const matchesSearch = !query || item.name.toLowerCase().includes(query);
       const matchesZero = !state.hideZero || Number(item.qty) > 0;
-      return matchesSearch && matchesZero;
+      const matchesOrderOnly = !state.orderOnly || Number(item.qty) > 0;
+      return matchesSearch && matchesZero && matchesOrderOnly;
     });
 
     if (!visibleItems.length) continue;
@@ -562,6 +613,7 @@ function renderInventory() {
       const stepper = document.createElement("div");
       stepper.className = "stepper";
       stepper.innerHTML = `
+        <button class="zero" type="button" data-action="zero" aria-label="${item.name} 0으로">0</button>
         <button class="minus" type="button" data-action="minus" aria-label="${item.name} 줄이기">-</button>
         <input class="qty" type="number" min="0" inputmode="numeric" value="${item.qty}" data-action="qty" aria-label="${item.name} 수량" />
         <button class="plus" type="button" data-action="plus" aria-label="${item.name} 늘리기">+</button>
@@ -587,11 +639,13 @@ function render() {
   renderCategoryControls();
   renderMetrics();
   renderReview();
+  renderActivity();
   renderRecommendations();
   renderInventory();
   renderOrderCenter();
   updatePreview();
   elements.toggleZeroBtn.textContent = state.hideZero ? "0개 숨김" : "0개 표시";
+  elements.orderOnlyBtn.textContent = state.orderOnly ? "전체 보기" : "발주만";
   elements.undoBtn.disabled = !state.history.length;
 }
 
@@ -629,6 +683,7 @@ async function setQty(itemId, qty, options = {}) {
 
   try {
     await persistQty(item);
+    if (!options.silent) logActivity(`${item.name} ${item.qty}개로 변경`);
   } catch (error) {
     setConnectionStatus(false);
     writeLocalStore();
@@ -643,6 +698,7 @@ async function applySinglePrediction(itemId) {
 
   await setQty(itemId, prediction.qty);
   showToast(`${item.name} AI 수량을 적용했습니다`);
+  logActivity(`${item.name} AI 추천 적용`);
 }
 
 function currentSnapshot() {
@@ -681,6 +737,7 @@ async function saveRecord() {
       render();
     }
     showToast("오늘 기록을 저장하고 학습했습니다");
+    logActivity("오늘 재고 기록 저장/학습");
   } finally {
     setSaving(false);
   }
@@ -708,6 +765,7 @@ async function applyPrediction() {
       render();
     }
     showToast("AI 예측 수량을 적용했습니다");
+    logActivity("전체 AI 예측 적용");
   } finally {
     setSaving(false);
   }
@@ -747,6 +805,7 @@ async function addItem() {
   state.predictions = state.online ? state.predictions : buildLocalPredictions();
   render();
   showToast("품목을 바로 추가했습니다");
+  logActivity(`${name} 품목 추가`);
   setSaving(true);
 
   try {
@@ -781,6 +840,7 @@ async function copyMessage() {
     document.execCommand("copy");
   }
   showToast("복사했습니다");
+  logActivity("전체 주문 리스트 복사");
 }
 
 async function copyBidfoodOrder() {
@@ -794,6 +854,7 @@ async function copyBidfoodOrder() {
     updatePreview();
   }
   showToast("비드푸드 발주 내용을 복사했습니다");
+  logActivity("비드푸드 발주 복사");
 }
 
 async function shareMessage() {
@@ -844,6 +905,7 @@ function downloadBidfoodCsv() {
   link.remove();
   URL.revokeObjectURL(url);
   showToast("비드푸드 CSV를 만들었습니다");
+  logActivity("비드푸드 CSV 생성");
 }
 
 async function copyOrderCenter() {
@@ -855,6 +917,7 @@ async function copyOrderCenter() {
     document.execCommand("copy");
   }
   showToast("선택한 발주 내용을 복사했습니다");
+  logActivity(`${getSelectedOrderGroup().name} 발주 복사`);
 }
 
 function downloadOrderCenterCsv() {
@@ -873,6 +936,7 @@ function downloadOrderCenterCsv() {
   link.remove();
   URL.revokeObjectURL(url);
   showToast("선택한 발주 CSV를 만들었습니다");
+  logActivity(`${group.name} 발주 CSV 생성`);
 }
 
 async function completeOrder() {
@@ -882,6 +946,7 @@ async function completeOrder() {
   }
   await saveRecord();
   showToast("발주 완료 기록을 저장했습니다");
+  logActivity(`${getSelectedOrderGroup().name} 발주 완료 기록`);
 }
 
 function openOrderCenter() {
@@ -912,6 +977,7 @@ async function zeroAll() {
   }
 
   showToast("전체 수량을 0으로 바꿨습니다");
+  logActivity("전체 수량 0으로 변경");
 }
 
 function restoreDefaults() {
@@ -926,6 +992,7 @@ function restoreDefaults() {
   writeLocalStore();
   render();
   showToast("기본 리스트로 복구했습니다");
+  logActivity("기본 리스트 복구");
 }
 
 function undoLastChange() {
@@ -936,6 +1003,7 @@ function undoLastChange() {
   writeLocalStore();
   render();
   showToast(`${last.label} 되돌림`);
+  logActivity(`${last.label} 되돌림`);
 }
 
 function setSelectedCategory(value) {
@@ -968,6 +1036,7 @@ function bindEvents() {
   $("downloadBidfoodBtn").addEventListener("click", downloadBidfoodCsv);
   $("showBidfoodBtn").addEventListener("click", showBidfoodOnly);
   $("openOrderCenterBtn").addEventListener("click", openOrderCenter);
+  $("bottomOrderCenterBtn").addEventListener("click", openOrderCenter);
   $("closeOrderCenterBtn").addEventListener("click", closeOrderCenter);
   $("copyOrderCenterBtn").addEventListener("click", () => copyOrderCenter().catch((error) => showToast(error.message)));
   $("downloadOrderCenterBtn").addEventListener("click", downloadOrderCenterCsv);
@@ -975,6 +1044,11 @@ function bindEvents() {
   $("zeroAllBtn").addEventListener("click", () => zeroAll().catch((error) => showToast(error.message)));
   $("restoreBtn").addEventListener("click", restoreDefaults);
   $("undoBtn").addEventListener("click", undoLastChange);
+  $("clearActivityBtn").addEventListener("click", () => {
+    state.activities = [];
+    writeActivities();
+    renderActivity();
+  });
 
   elements.searchInput.addEventListener("input", render);
   elements.categoryFilter.addEventListener("change", (event) => setSelectedCategory(event.target.value));
@@ -1009,6 +1083,12 @@ function bindEvents() {
     render();
   });
 
+  elements.orderOnlyBtn.addEventListener("click", () => {
+    state.orderOnly = !state.orderOnly;
+    if (state.orderOnly) state.hideZero = true;
+    render();
+  });
+
   elements.inventory.addEventListener("click", (event) => {
     const button = event.target.closest("button[data-action]");
     if (!button) return;
@@ -1023,7 +1103,9 @@ function bindEvents() {
       return;
     }
 
-    const nextQty = button.dataset.action === "plus-five"
+    const nextQty = button.dataset.action === "zero"
+      ? 0
+      : button.dataset.action === "plus-five"
       ? item.qty + 5
       : button.dataset.action === "plus"
         ? item.qty + 1
@@ -1045,4 +1127,5 @@ function bindEvents() {
 }
 
 bindEvents();
+state.activities = readActivities();
 loadData();

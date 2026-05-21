@@ -64,6 +64,7 @@
           <select id="categoryFilter" aria-label="카테고리 필터">
             <option value="all">전체 카테고리</option>
           </select>
+          <button class="btn" id="orderOnlyBtn" type="button">발주만</button>
           <button class="btn" id="toggleZeroBtn" type="button">0개 숨김</button>
           <button class="btn" id="undoBtn" type="button">되돌리기</button>
         </section>
@@ -90,6 +91,17 @@
             <button class="btn small" id="showBidfoodBtn" type="button">비드푸드만 보기</button>
           </div>
           <div class="review-list" id="reviewList"></div>
+        </section>
+
+        <section class="panel activity-panel">
+          <div class="panel-head">
+            <div>
+              <h2>최근 작업</h2>
+              <p>오늘 바꾼 내용과 발주 흐름을 남깁니다.</p>
+            </div>
+            <button class="btn small" id="clearActivityBtn" type="button">지우기</button>
+          </div>
+          <div class="activity-list" id="activityList"></div>
         </section>
 
         <section class="panel">
@@ -132,6 +144,7 @@
   </main>
 
   <nav class="bottom-bar">
+    <button class="btn primary" id="bottomOrderCenterBtn" type="button">발주 센터</button>
     <button class="btn danger" id="zeroAllBtn" type="button">전체 0으로</button>
     <button class="btn" id="restoreBtn" type="button">기본 리스트 복구</button>
   </nav>
