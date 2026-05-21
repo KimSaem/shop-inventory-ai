@@ -49,7 +49,7 @@ npm run db:create
 npm run db:migrate:remote
 ```
 
-For dashboard-based Pages deploys, keep the D1 binding in Cloudflare dashboard instead of committing a placeholder `database_id` to `wrangler.toml`.
+This project is set up for dashboard-managed Cloudflare Pages settings. There is no committed `wrangler.toml`, so bindings can be added from the Cloudflare dashboard.
 
 ## Prediction Logic
 
