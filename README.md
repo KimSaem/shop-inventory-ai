@@ -35,7 +35,7 @@ Open `index.html` in a browser to use local fallback mode. Buttons work without 
 4. Leave Build command empty.
 5. Set Build output directory to `public`.
 6. Create a D1 database.
-7. Add a Pages Functions binding:
+7. Add a Pages Functions binding in the Cloudflare dashboard:
    - Binding name: `DB`
    - Database: your D1 database
 8. Run `migrations/0001_initial.sql` in the D1 console or with Wrangler.
@@ -49,7 +49,7 @@ npm run db:create
 npm run db:migrate:remote
 ```
 
-After `wrangler d1 create`, copy the generated `database_id` into `wrangler.toml`.
+For dashboard-based Pages deploys, keep the D1 binding in Cloudflare dashboard instead of committing a placeholder `database_id` to `wrangler.toml`.
 
 ## Prediction Logic
 
