@@ -32,6 +32,7 @@
         <button class="btn" id="shareBtn" type="button">공유</button>
         <button class="btn success" id="saveRecordBtn" type="button">오늘 저장/학습</button>
         <button class="btn" id="applyPredictBtn" type="button">AI 예측 적용</button>
+        <button class="btn primary ghost" id="openOrderCenterBtn" type="button">발주 센터</button>
       </div>
     </section>
 
@@ -136,6 +137,33 @@
   </nav>
 
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+  <section class="modal-backdrop" id="orderModal" aria-hidden="true">
+    <div class="order-modal" role="dialog" aria-modal="true" aria-labelledby="orderModalTitle">
+      <div class="modal-head">
+        <div>
+          <div class="eyebrow">Supplier Order Hub</div>
+          <h2 id="orderModalTitle">발주 센터</h2>
+          <p id="orderCenterSummary">공급사별 발주 내용을 확인하세요.</p>
+        </div>
+        <button class="icon-btn" id="closeOrderCenterBtn" type="button" aria-label="닫기">×</button>
+      </div>
+
+      <div class="order-toolbar">
+        <div class="order-tabs" id="orderSupplierTabs"></div>
+        <div class="order-actions">
+          <button class="btn" id="copyOrderCenterBtn" type="button">선택 복사</button>
+          <button class="btn" id="downloadOrderCenterBtn" type="button">선택 CSV</button>
+          <button class="btn success" id="completeOrderBtn" type="button">발주 완료 기록</button>
+        </div>
+      </div>
+
+      <div class="order-modal-grid">
+        <div class="order-list" id="orderCenterContent"></div>
+        <textarea id="orderCenterPreview" readonly></textarea>
+      </div>
+    </div>
+  </section>
   <script src="/app.js" defer></script>
 </body>
 </html>

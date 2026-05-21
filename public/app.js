@@ -21,6 +21,7 @@ const state = {
   online: true,
   hideZero: true,
   selectedCategory: "all",
+  selectedOrderGroup: "all",
   history: [],
   saving: false
 };
@@ -36,6 +37,11 @@ const elements = {
   issueCount: $("issueCount"),
   bidfoodOrderCount: $("bidfoodOrderCount"),
   reviewList: $("reviewList"),
+  orderModal: $("orderModal"),
+  orderSupplierTabs: $("orderSupplierTabs"),
+  orderCenterContent: $("orderCenterContent"),
+  orderCenterPreview: $("orderCenterPreview"),
+  orderCenterSummary: $("orderCenterSummary"),
   orderItemCount: $("orderItemCount"),
   orderUnitCount: $("orderUnitCount"),
   confidenceText: $("confidenceText"),
@@ -286,6 +292,50 @@ function formatBidfoodOrder() {
   return lines.length ? `[비드푸드 발주]\n${lines.join("\n")}` : "비드푸드 발주 품목 없음";
 }
 
+function getOrderGroups() {
+  const groups = state.categories
+    .map((category) => ({
+      id: String(category.id),
+      name: category.name,
+      items: category.items
+        .filter((item) => Number(item.qty) > 0)
+        .map((item) => ({
+          id: item.id,
+          name: item.name,
+          qty: Number(item.qty) || 0,
+          category: category.name
+        }))
+    }))
+    .filter((group) => group.items.length);
+
+  const allItems = groups.flatMap((group) => group.items);
+  return [
+    { id: "all", name: "전체 발주", items: allItems },
+    ...groups
+  ];
+}
+
+function getSelectedOrderGroup() {
+  const groups = getOrderGroups();
+  return groups.find((group) => group.id === state.selectedOrderGroup) || groups[0] || { id: "all", name: "전체 발주", items: [] };
+}
+
+function formatOrderGroup(group = getSelectedOrderGroup()) {
+  if (!group.items.length) return `${group.name}\n발주 품목 없음`;
+  const sections = group.id === "all"
+    ? state.categories
+      .map((category) => {
+        const lines = category.items
+          .filter((item) => Number(item.qty) > 0)
+          .map((item) => `${item.name} ${item.qty}`);
+        return lines.length ? `[${category.name}]\n${lines.join("\n")}` : "";
+      })
+      .filter(Boolean)
+    : [`[${group.name}]\n${group.items.map((item) => `${item.name} ${item.qty}`).join("\n")}`];
+
+  return sections.join("\n\n");
+}
+
 function updatePreview() {
   elements.messageOutput.value = formatMessage();
 }
@@ -405,6 +455,55 @@ function renderRecommendations() {
   }
 }
 
+function renderOrderCenter() {
+  const groups = getOrderGroups();
+  const selected = getSelectedOrderGroup();
+  const totalQty = selected.items.reduce((sum, item) => sum + item.qty, 0);
+
+  elements.orderSupplierTabs.innerHTML = "";
+  for (const group of groups.length ? groups : [{ id: "all", name: "전체 발주", items: [] }]) {
+    const tab = document.createElement("button");
+    tab.type = "button";
+    tab.className = `tab-btn${group.id === selected.id ? " active" : ""}`;
+    tab.dataset.orderGroup = group.id;
+    tab.textContent = `${group.name} ${group.items.length}`;
+    elements.orderSupplierTabs.append(tab);
+  }
+
+  elements.orderCenterSummary.textContent = `${selected.name}: ${selected.items.length}개 품목, 총 ${totalQty}개`;
+  elements.orderCenterContent.innerHTML = "";
+
+  if (!selected.items.length) {
+    const empty = document.createElement("div");
+    empty.className = "empty-state";
+    empty.textContent = "발주할 품목이 없습니다. 재고 화면에서 수량을 먼저 입력하세요.";
+    elements.orderCenterContent.append(empty);
+  } else {
+    for (const item of selected.items) {
+      const row = document.createElement("div");
+      row.className = "order-line";
+
+      const copy = document.createElement("div");
+      const name = document.createElement("div");
+      name.className = "order-line-name";
+      name.textContent = item.name;
+      const meta = document.createElement("div");
+      meta.className = "order-line-meta";
+      meta.textContent = item.category;
+      copy.append(name, meta);
+
+      const qty = document.createElement("div");
+      qty.className = "order-line-qty";
+      qty.textContent = item.qty;
+
+      row.append(copy, qty);
+      elements.orderCenterContent.append(row);
+    }
+  }
+
+  elements.orderCenterPreview.value = formatOrderGroup(selected);
+}
+
 function renderInventory() {
   const query = elements.searchInput.value.trim().toLowerCase();
   elements.inventory.innerHTML = "";
@@ -490,6 +589,7 @@ function render() {
   renderReview();
   renderRecommendations();
   renderInventory();
+  renderOrderCenter();
   updatePreview();
   elements.toggleZeroBtn.textContent = state.hideZero ? "0개 숨김" : "0개 표시";
   elements.undoBtn.disabled = !state.history.length;
@@ -746,6 +846,56 @@ function downloadBidfoodCsv() {
   showToast("비드푸드 CSV를 만들었습니다");
 }
 
+async function copyOrderCenter() {
+  const text = formatOrderGroup();
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch (error) {
+    elements.orderCenterPreview.select();
+    document.execCommand("copy");
+  }
+  showToast("선택한 발주 내용을 복사했습니다");
+}
+
+function downloadOrderCenterCsv() {
+  const group = getSelectedOrderGroup();
+  const rows = [["Supplier", "Item", "Quantity"], ...group.items.map((item) => [item.category, item.name, item.qty])];
+  const csv = rows
+    .map((row) => row.map((cell) => `"${String(cell).replaceAll('"', '""')}"`).join(","))
+    .join("\n");
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `${group.name.replaceAll(" ", "-")}-order.csv`;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+  showToast("선택한 발주 CSV를 만들었습니다");
+}
+
+async function completeOrder() {
+  if (!getSelectedOrderGroup().items.length) {
+    showToast("완료 기록할 발주 품목이 없습니다");
+    return;
+  }
+  await saveRecord();
+  showToast("발주 완료 기록을 저장했습니다");
+}
+
+function openOrderCenter() {
+  state.selectedOrderGroup = "all";
+  renderOrderCenter();
+  elements.orderModal.classList.add("open");
+  elements.orderModal.setAttribute("aria-hidden", "false");
+}
+
+function closeOrderCenter() {
+  elements.orderModal.classList.remove("open");
+  elements.orderModal.setAttribute("aria-hidden", "true");
+}
+
 async function zeroAll() {
   if (!confirm("전체 수량을 0으로 바꿀까요?")) return;
   pushHistory("전체 0으로");
@@ -817,6 +967,11 @@ function bindEvents() {
   $("copyBidfoodBtn").addEventListener("click", copyBidfoodOrder);
   $("downloadBidfoodBtn").addEventListener("click", downloadBidfoodCsv);
   $("showBidfoodBtn").addEventListener("click", showBidfoodOnly);
+  $("openOrderCenterBtn").addEventListener("click", openOrderCenter);
+  $("closeOrderCenterBtn").addEventListener("click", closeOrderCenter);
+  $("copyOrderCenterBtn").addEventListener("click", () => copyOrderCenter().catch((error) => showToast(error.message)));
+  $("downloadOrderCenterBtn").addEventListener("click", downloadOrderCenterCsv);
+  $("completeOrderBtn").addEventListener("click", () => completeOrder().catch((error) => showToast(error.message)));
   $("zeroAllBtn").addEventListener("click", () => zeroAll().catch((error) => showToast(error.message)));
   $("restoreBtn").addEventListener("click", restoreDefaults);
   $("undoBtn").addEventListener("click", undoLastChange);
@@ -826,6 +981,23 @@ function bindEvents() {
   elements.categoryTabs.addEventListener("click", (event) => {
     const tab = event.target.closest("[data-category]");
     if (tab) setSelectedCategory(tab.dataset.category);
+  });
+
+  elements.orderSupplierTabs.addEventListener("click", (event) => {
+    const tab = event.target.closest("[data-order-group]");
+    if (!tab) return;
+    state.selectedOrderGroup = tab.dataset.orderGroup;
+    renderOrderCenter();
+  });
+
+  elements.orderModal.addEventListener("click", (event) => {
+    if (event.target === elements.orderModal) closeOrderCenter();
+  });
+
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && elements.orderModal.classList.contains("open")) {
+      closeOrderCenter();
+    }
   });
 
   elements.newItemName.addEventListener("keydown", (event) => {
