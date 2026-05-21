@@ -1,0 +1,42 @@
+CREATE TABLE IF NOT EXISTS categories (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL UNIQUE,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS items (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  category_id INTEGER NOT NULL,
+  name TEXT NOT NULL,
+  current_qty INTEGER NOT NULL DEFAULT 0,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  active INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (category_id) REFERENCES categories(id),
+  UNIQUE(category_id, name)
+);
+
+CREATE TABLE IF NOT EXISTS inventory_records (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  record_date TEXT NOT NULL UNIQUE,
+  weekday INTEGER NOT NULL,
+  note TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS inventory_record_items (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  record_id INTEGER NOT NULL,
+  item_id INTEGER NOT NULL,
+  qty INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (record_id) REFERENCES inventory_records(id) ON DELETE CASCADE,
+  FOREIGN KEY (item_id) REFERENCES items(id),
+  UNIQUE(record_id, item_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_items_category ON items(category_id);
+CREATE INDEX IF NOT EXISTS idx_record_items_item ON inventory_record_items(item_id);
+CREATE INDEX IF NOT EXISTS idx_records_date ON inventory_records(record_date);
