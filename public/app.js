@@ -33,6 +33,9 @@ const elements = {
   connectionBadge: $("connectionBadge"),
   recordsCount: $("recordsCount"),
   predictedCount: $("predictedCount"),
+  issueCount: $("issueCount"),
+  bidfoodOrderCount: $("bidfoodOrderCount"),
+  reviewList: $("reviewList"),
   orderItemCount: $("orderItemCount"),
   orderUnitCount: $("orderUnitCount"),
   confidenceText: $("confidenceText"),
@@ -214,6 +217,44 @@ function getOrderSummary() {
   };
 }
 
+function getTodayKey() {
+  const now = new Date();
+  return new Date(now.getTime() - now.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
+}
+
+function buildReviewItems() {
+  const summary = getOrderSummary();
+  const bidfoodCount = getBidfoodItems().length;
+  const today = getTodayKey();
+  const items = [];
+
+  items.push({
+    status: summary.itemCount ? "good" : "warn",
+    icon: summary.itemCount ? "✓" : "!",
+    text: summary.itemCount ? `${summary.itemCount}개 품목, 총 ${summary.unitCount}개가 주문 리스트에 있습니다.` : "아직 주문할 품목이 없습니다."
+  });
+
+  items.push({
+    status: state.lastRecordDate === today ? "good" : "warn",
+    icon: state.lastRecordDate === today ? "✓" : "!",
+    text: state.lastRecordDate === today ? "오늘 학습 기록이 저장되었습니다." : "아직 오늘 저장/학습을 누르지 않았습니다."
+  });
+
+  items.push({
+    status: state.online ? "good" : "warn",
+    icon: state.online ? "✓" : "!",
+    text: state.online ? "Cloudflare DB에 연결되어 있습니다." : "현재 로컬 모드입니다. DB 연결 후에도 계속 사용할 수 있습니다."
+  });
+
+  items.push({
+    status: bidfoodCount ? "good" : "warn",
+    icon: bidfoodCount ? "✓" : "!",
+    text: bidfoodCount ? `비드푸드 발주 품목 ${bidfoodCount}개가 준비되었습니다.` : "비드푸드 발주 품목은 아직 없습니다."
+  });
+
+  return items;
+}
+
 function formatMessage() {
   const sections = [];
 
@@ -294,16 +335,34 @@ function renderCategoryControls() {
 function renderMetrics() {
   const summary = getOrderSummary();
   const predicted = state.predictions.filter((prediction) => Number(prediction.qty) > 0);
+  const reviewItems = buildReviewItems();
+  const warningCount = reviewItems.filter((item) => item.status === "warn").length;
 
   elements.orderItemCount.textContent = String(summary.itemCount);
   elements.orderUnitCount.textContent = String(summary.unitCount);
   elements.recordsCount.textContent = String(state.recordsCount);
   elements.predictedCount.textContent = String(predicted.length);
+  elements.issueCount.textContent = warningCount ? String(warningCount) : "OK";
+  elements.bidfoodOrderCount.textContent = String(getBidfoodItems().length);
   elements.confidenceText.textContent = getConfidenceLabel();
   elements.lastRecord.textContent = state.lastRecordDate ? `마지막 학습 ${state.lastRecordDate}` : "마지막 학습 없음";
   elements.predictionSubtext.textContent = state.recordsCount
     ? `${state.recordsCount}회 기록 기준으로 추천합니다.`
     : "오늘 저장/학습을 누르면 추천이 시작됩니다.";
+}
+
+function renderReview() {
+  elements.reviewList.innerHTML = "";
+  for (const item of buildReviewItems()) {
+    const row = document.createElement("div");
+    row.className = `review-item ${item.status}`;
+    const icon = document.createElement("strong");
+    icon.textContent = item.icon;
+    const text = document.createElement("span");
+    text.textContent = item.text;
+    row.append(icon, text);
+    elements.reviewList.append(row);
+  }
 }
 
 function renderRecommendations() {
@@ -407,6 +466,7 @@ function renderInventory() {
         <button class="minus" type="button" data-action="minus" aria-label="${item.name} 줄이기">-</button>
         <input class="qty" type="number" min="0" inputmode="numeric" value="${item.qty}" data-action="qty" aria-label="${item.name} 수량" />
         <button class="plus" type="button" data-action="plus" aria-label="${item.name} 늘리기">+</button>
+        <button class="plus-five" type="button" data-action="plus-five" aria-label="${item.name} 5개 늘리기">+5</button>
       `;
 
       row.append(main, pill, stepper);
@@ -427,6 +487,7 @@ function renderInventory() {
 function render() {
   renderCategoryControls();
   renderMetrics();
+  renderReview();
   renderRecommendations();
   renderInventory();
   updatePreview();
@@ -732,6 +793,19 @@ function setSelectedCategory(value) {
   render();
 }
 
+function showBidfoodOnly() {
+  const category = state.categories.find((entry) => entry.name === "비드푸드");
+  if (!category) {
+    showToast("비드푸드 카테고리를 찾지 못했습니다");
+    return;
+  }
+  state.selectedCategory = String(category.id);
+  state.hideZero = false;
+  elements.searchInput.value = "";
+  render();
+  showToast("비드푸드 전체 품목을 표시합니다");
+}
+
 function bindEvents() {
   $("refreshBtn").addEventListener("click", loadData);
   $("copyBtn").addEventListener("click", copyMessage);
@@ -742,6 +816,7 @@ function bindEvents() {
   $("downloadBtn").addEventListener("click", downloadBackup);
   $("copyBidfoodBtn").addEventListener("click", copyBidfoodOrder);
   $("downloadBidfoodBtn").addEventListener("click", downloadBidfoodCsv);
+  $("showBidfoodBtn").addEventListener("click", showBidfoodOnly);
   $("zeroAllBtn").addEventListener("click", () => zeroAll().catch((error) => showToast(error.message)));
   $("restoreBtn").addEventListener("click", restoreDefaults);
   $("undoBtn").addEventListener("click", undoLastChange);
@@ -776,7 +851,11 @@ function bindEvents() {
       return;
     }
 
-    const nextQty = button.dataset.action === "plus" ? item.qty + 1 : item.qty - 1;
+    const nextQty = button.dataset.action === "plus-five"
+      ? item.qty + 5
+      : button.dataset.action === "plus"
+        ? item.qty + 1
+        : item.qty - 1;
     setQty(itemId, nextQty).catch((error) => showToast(error.message));
   });
 

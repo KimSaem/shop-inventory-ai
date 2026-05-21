@@ -419,7 +419,7 @@ textarea:focus {
 
 .stepper {
   display: grid;
-  grid-template-columns: 42px 56px 42px;
+  grid-template-columns: 42px 56px 42px 46px;
 }
 
 .stepper button,
@@ -441,8 +441,14 @@ textarea:focus {
 }
 
 .plus {
-  border-radius: 0 var(--radius) var(--radius) 0;
   color: var(--green);
+}
+
+.plus-five {
+  border-left: 0;
+  border-radius: 0 var(--radius) var(--radius) 0;
+  color: var(--blue);
+  font-size: 15px;
 }
 
 .qty {
@@ -483,6 +489,67 @@ textarea:focus {
 .small-pill {
   background: var(--blue-soft);
   color: var(--blue);
+}
+
+.review-panel {
+  border-color: #c7d2fe;
+}
+
+.review-stats {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 10px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel-subtle);
+}
+
+.review-stats span {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.review-stats strong {
+  display: block;
+  margin-top: 2px;
+  font-size: 22px;
+  font-weight: 950;
+}
+
+.review-list {
+  display: grid;
+  gap: 8px;
+}
+
+.review-item {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+  padding: 9px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: white;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 750;
+}
+
+.review-item.good {
+  border-color: #a7e3b8;
+  background: var(--green-soft);
+  color: var(--green);
+}
+
+.review-item.warn {
+  border-color: #fed7aa;
+  background: var(--amber-soft);
+  color: var(--amber);
 }
 
 .recommendation-list {
@@ -651,7 +718,7 @@ textarea {
   }
 
   .stepper {
-    grid-template-columns: 40px 54px 40px;
+    grid-template-columns: 40px 54px 40px 44px;
   }
 
   .qty {
