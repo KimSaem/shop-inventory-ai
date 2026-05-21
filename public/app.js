@@ -127,6 +127,18 @@ function getAllItems() {
   })));
 }
 
+function getNextLocalItemId() {
+  return Math.max(0, ...state.categories.flatMap((category) => category.items.map((item) => Number(item.id) || 0))) + 1;
+}
+
+function findCategory(categoryId) {
+  return state.categories.find((category) => Number(category.id) === Number(categoryId));
+}
+
+function normalizeName(value) {
+  return String(value || "").trim().replace(/\s+/g, " ");
+}
+
 function buildLocalPredictions() {
   return getAllItems().map((item) => {
     const values = state.records.map((record) => {
@@ -305,11 +317,14 @@ function renderRecommendations() {
     meta.textContent = `${item.category} · ${item.reason || "AI 추천"}`;
     copy.append(name, meta);
 
-    const qty = document.createElement("div");
-    qty.className = "recommendation-qty";
-    qty.textContent = item.qty;
+    const action = document.createElement("button");
+    action.type = "button";
+    action.className = "recommendation-action";
+    action.dataset.applyPrediction = String(item.itemId);
+    action.textContent = item.qty;
+    action.title = `${item.name} ${item.qty}개 적용`;
 
-    row.append(copy, qty);
+    row.append(copy, action);
     elements.recommendationList.append(row);
   }
 }
@@ -361,9 +376,13 @@ function renderInventory() {
       meta.textContent = prediction ? prediction.reason : "예측 대기";
       main.append(name, meta);
 
-      const pill = document.createElement("div");
+      const pill = document.createElement("button");
+      pill.type = "button";
       pill.className = `prediction-pill${prediction && prediction.confidence === "low" ? " low" : ""}`;
+      pill.dataset.action = "apply-one";
       pill.textContent = prediction ? `AI ${prediction.qty}` : "AI -";
+      pill.disabled = !prediction;
+      pill.title = prediction ? `${item.name} 예측 수량 적용` : "예측 대기";
 
       const stepper = document.createElement("div");
       stepper.className = "stepper";
@@ -439,6 +458,15 @@ async function setQty(itemId, qty, options = {}) {
   }
 }
 
+async function applySinglePrediction(itemId) {
+  const prediction = getPrediction(itemId);
+  const item = findItem(itemId);
+  if (!prediction || !item) return;
+
+  await setQty(itemId, prediction.qty);
+  showToast(`${item.name} AI 수량을 적용했습니다`);
+}
+
 function currentSnapshot() {
   return getAllItems().map((item) => ({
     id: item.id,
@@ -508,32 +536,59 @@ async function applyPrediction() {
 }
 
 async function addItem() {
-  const name = elements.newItemName.value.trim();
+  const name = normalizeName(elements.newItemName.value);
   const categoryId = Number(elements.newItemCategory.value);
   if (!name) {
     showToast("품목 이름을 입력하세요");
     return;
   }
 
+  const category = findCategory(categoryId);
+  if (!category) {
+    showToast("카테고리를 선택하세요");
+    return;
+  }
+
+  const duplicate = category.items.find((item) => normalizeName(item.name).toLowerCase() === name.toLowerCase());
+  if (duplicate) {
+    state.selectedCategory = String(categoryId);
+    state.hideZero = false;
+    elements.searchInput.value = name;
+    render();
+    showToast("이미 있는 품목을 보여드렸습니다");
+    return;
+  }
+
   pushHistory("품목 추가");
+  const optimisticItem = { id: getNextLocalItemId(), name, qty: 1, pending: true };
+  category.items.push(optimisticItem);
+  state.selectedCategory = String(categoryId);
+  state.hideZero = false;
+  elements.searchInput.value = "";
+  elements.newItemName.value = "";
+  state.predictions = state.online ? state.predictions : buildLocalPredictions();
+  render();
+  showToast("품목을 바로 추가했습니다");
   setSaving(true);
 
   try {
     if (state.online) {
       await api("?action=add-item", {
         method: "POST",
-        body: JSON.stringify({ categoryId, name, qty: 0 })
+        body: JSON.stringify({ categoryId, name, qty: 1 })
       });
       await loadData();
     } else {
-      const category = state.categories.find((entry) => entry.id === categoryId);
-      const maxId = Math.max(0, ...state.categories.flatMap((entry) => entry.items.map((item) => item.id)));
-      category.items.push({ id: maxId + 1, name, qty: 0 });
+      optimisticItem.pending = false;
       writeLocalStore();
       render();
     }
-    elements.newItemName.value = "";
-    showToast("품목을 추가했습니다");
+  } catch (error) {
+    setConnectionStatus(false);
+    optimisticItem.pending = false;
+    writeLocalStore();
+    render();
+    showToast("DB 연결 전이라 로컬에 먼저 저장했습니다");
   } finally {
     setSaving(false);
   }
@@ -667,8 +722,19 @@ function bindEvents() {
     const item = findItem(itemId);
     if (!item) return;
 
+    if (button.dataset.action === "apply-one") {
+      applySinglePrediction(itemId).catch((error) => showToast(error.message));
+      return;
+    }
+
     const nextQty = button.dataset.action === "plus" ? item.qty + 1 : item.qty - 1;
     setQty(itemId, nextQty).catch((error) => showToast(error.message));
+  });
+
+  elements.recommendationList.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-apply-prediction]");
+    if (!button) return;
+    applySinglePrediction(Number(button.dataset.applyPrediction)).catch((error) => showToast(error.message));
   });
 
   elements.inventory.addEventListener("change", (event) => {

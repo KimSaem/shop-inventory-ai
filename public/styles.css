@@ -400,13 +400,21 @@ textarea:focus {
 }
 
 .prediction-pill {
+  border: 1px solid transparent;
   background: var(--green-soft);
   color: var(--green);
+  cursor: pointer;
 }
 
 .prediction-pill.low {
   background: var(--amber-soft);
   color: var(--amber);
+}
+
+.prediction-pill:disabled {
+  color: var(--muted);
+  background: var(--panel-subtle);
+  cursor: default;
 }
 
 .stepper {
@@ -499,12 +507,21 @@ textarea:focus {
   font-weight: 700;
 }
 
-.recommendation-qty {
+.recommendation-action {
   min-width: 42px;
+  min-height: 38px;
+  border: 1px solid #a7e3b8;
+  border-radius: var(--radius);
+  background: var(--green-soft);
   text-align: center;
   color: var(--green);
   font-size: 18px;
   font-weight: 950;
+  cursor: pointer;
+}
+
+.recommendation-action:hover {
+  border-color: var(--green);
 }
 
 textarea {
@@ -519,6 +536,13 @@ textarea {
   display: grid;
   gap: 8px;
   margin-top: 10px;
+}
+
+.form-hint {
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
 }
 
 .bottom-bar {
