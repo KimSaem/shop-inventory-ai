@@ -195,6 +195,14 @@
           <span>학습 신뢰도</span>
           <strong id="posConfidence">시작</strong>
         </div>
+        <div class="metric-card compact">
+          <span>평균 객단가</span>
+          <strong id="posAverageTicket">$0.00</strong>
+        </div>
+        <div class="metric-card compact">
+          <span>오늘 1위 상품</span>
+          <strong id="posTopProduct">-</strong>
+        </div>
       </div>
 
       <div class="pos-layout">
@@ -215,6 +223,14 @@
             <button class="btn small" id="clearPosCartBtn" type="button">비우기</button>
           </div>
           <div class="pos-cart-list" id="posCartList"></div>
+          <div class="pos-cart-tools">
+            <label>
+              <span>할인</span>
+              <input id="posDiscount" type="number" min="0" step="0.1" inputmode="decimal" value="0" />
+            </label>
+            <button class="btn" id="holdPosOrderBtn" type="button">주문 보류</button>
+            <button class="btn" id="recallPosOrderBtn" type="button">보류 불러오기</button>
+          </div>
           <div class="pos-total">
             <span>Total</span>
             <strong id="posCartTotal">$0.00</strong>
@@ -228,6 +244,17 @@
       </div>
 
       <div class="pos-insight-grid">
+        <section class="panel">
+          <div class="panel-head">
+            <div>
+              <h2>영수증 미리보기</h2>
+              <p>결제 전 주문 내용을 바로 확인하고 복사합니다.</p>
+            </div>
+            <button class="btn small" id="copyPosReceiptBtn" type="button">복사</button>
+          </div>
+          <textarea id="posReceiptPreview" readonly></textarea>
+        </section>
+
         <section class="panel">
           <div class="panel-head">
             <div>
@@ -262,6 +289,16 @@
             </div>
           </div>
           <div class="history-list" id="posRecentSales"></div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <div>
+              <h2>결제 분석</h2>
+              <p>오늘 결제 수단과 피크 시간을 확인합니다.</p>
+            </div>
+          </div>
+          <div class="ingredient-list" id="posPaymentMix"></div>
         </section>
       </div>
     </div>

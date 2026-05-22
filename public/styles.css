@@ -846,7 +846,7 @@ textarea {
 
 .pos-metrics {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(6, minmax(0, 1fr));
   gap: 10px;
   padding: 14px 16px 0;
 }
@@ -854,6 +854,13 @@ textarea {
 .metric-card.compact {
   min-height: 76px;
   box-shadow: none;
+}
+
+.metric-card.compact strong {
+  overflow: hidden;
+  font-size: 22px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .pos-layout {
@@ -924,6 +931,26 @@ textarea {
   overflow: auto;
 }
 
+.pos-cart-tools {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 8px;
+  align-items: end;
+  padding: 10px 12px;
+  border-top: 1px solid var(--line);
+}
+
+.pos-cart-tools label {
+  display: grid;
+  gap: 5px;
+}
+
+.pos-cart-tools span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 850;
+}
+
 .pos-cart-row,
 .ingredient-row,
 .pos-sale-row {
@@ -976,7 +1003,7 @@ textarea {
 
 .pos-insight-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
   gap: 12px;
   padding: 0 16px 16px;
 }
@@ -984,6 +1011,15 @@ textarea {
 .pos-edit-form {
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 150px 100px auto;
   padding: 0 12px 12px;
+}
+
+#posReceiptPreview {
+  min-height: 190px;
+  margin: 0 12px 12px;
+  width: calc(100% - 24px);
+  font-family: Consolas, "SFMono-Regular", monospace;
+  font-size: 13px;
+  line-height: 1.45;
 }
 
 .item-form {
@@ -1119,6 +1155,10 @@ textarea {
 
   .pos-metrics {
     grid-template-columns: 1fr 1fr;
+  }
+
+  .pos-cart-tools {
+    grid-template-columns: 1fr;
   }
 
   #orderCenterPreview {

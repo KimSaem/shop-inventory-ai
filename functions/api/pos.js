@@ -91,6 +91,12 @@ async function ensureSchema(db) {
       PRIMARY KEY (product_id, inventory_item_id)
     )
   `).run();
+
+  try {
+    await db.prepare("ALTER TABLE pos_sales ADD COLUMN discount REAL NOT NULL DEFAULT 0").run();
+  } catch (error) {
+    if (!String(error.message || "").includes("duplicate column name")) throw error;
+  }
 }
 
 async function ensureSeeded(db) {
@@ -130,13 +136,40 @@ async function getTodayReport(db) {
     LIMIT 8
   `).bind(today).all();
 
+  const payments = await db.prepare(`
+    SELECT payment_method, COUNT(*) AS transactions, COALESCE(SUM(total), 0) AS total
+    FROM pos_sales
+    WHERE substr(sold_at, 1, 10) = ?
+    GROUP BY payment_method
+    ORDER BY total DESC
+  `).bind(today).all();
+
+  const hourly = await db.prepare(`
+    SELECT substr(sold_at, 12, 2) AS hour, COUNT(*) AS transactions, COALESCE(SUM(total), 0) AS total
+    FROM pos_sales
+    WHERE substr(sold_at, 1, 10) = ?
+    GROUP BY hour
+    ORDER BY hour
+  `).bind(today).all();
+
   return {
     date: today,
     transactions: Number(summary?.transactions || 0),
     revenue: Number(summary?.revenue || 0),
+    averageTicket: Number(summary?.transactions || 0) ? Number((Number(summary.revenue || 0) / Number(summary.transactions || 1)).toFixed(2)) : 0,
     soldItems: (items.results || []).map((item) => ({
       ...item,
       qty: Number(item.qty || 0),
+      total: Number(item.total || 0)
+    })),
+    paymentMix: (payments.results || []).map((item) => ({
+      method: item.payment_method,
+      transactions: Number(item.transactions || 0),
+      total: Number(item.total || 0)
+    })),
+    hourly: (hourly.results || []).map((item) => ({
+      hour: item.hour,
+      transactions: Number(item.transactions || 0),
       total: Number(item.total || 0)
     }))
   };
@@ -144,7 +177,7 @@ async function getTodayReport(db) {
 
 async function getRecentSales(db) {
   const sales = await db.prepare(`
-    SELECT id, sold_at, total, payment_method
+    SELECT id, sold_at, subtotal, discount, total, payment_method
     FROM pos_sales
     ORDER BY sold_at DESC, id DESC
     LIMIT 10
@@ -170,6 +203,8 @@ async function getRecentSales(db) {
 
   return rows.map((sale) => ({
     ...sale,
+    subtotal: Number(sale.subtotal || sale.total || 0),
+    discount: Number(sale.discount || 0),
     total: Number(sale.total || 0),
     items: grouped.get(sale.id) || []
   }));
@@ -260,13 +295,15 @@ async function recordSale(db, body) {
   });
 
   const total = Number(lines.reduce((sum, line) => sum + line.lineTotal, 0).toFixed(2));
+  const discount = Math.max(0, Math.min(total, Number(body.discount || 0)));
+  const finalTotal = Number((total - discount).toFixed(2));
   const paymentMethod = String(body.paymentMethod || "cash").slice(0, 40);
   const soldAt = new Date().toISOString();
 
   const sale = await db.prepare(`
-    INSERT INTO pos_sales (sold_at, subtotal, total, payment_method, note)
-    VALUES (?, ?, ?, ?, ?)
-  `).bind(soldAt, total, total, paymentMethod, body.note || null).run();
+    INSERT INTO pos_sales (sold_at, subtotal, discount, total, payment_method, note)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `).bind(soldAt, total, discount, finalTotal, paymentMethod, body.note || null).run();
 
   const saleId = sale.meta.last_row_id;
   for (const line of lines) {
@@ -276,7 +313,7 @@ async function recordSale(db, body) {
     `).bind(saleId, line.productId, line.name, line.category, line.qty, line.unitPrice, line.lineTotal).run();
   }
 
-  return { saleId, total, lines };
+  return { saleId, subtotal: total, discount, total: finalTotal, lines };
 }
 
 async function updateProduct(db, body) {

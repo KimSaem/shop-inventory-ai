@@ -2,6 +2,7 @@ const API_URL = "/api/inventory";
 const POS_API_URL = "/api/pos";
 const LOCAL_KEY = "shop-inventory-ai-local-v2";
 const POS_LOCAL_KEY = "shop-inventory-ai-pos-local-v1";
+const POS_HOLD_KEY = "shop-inventory-ai-pos-holds-v1";
 const ACTIVITY_KEY = "shop-inventory-ai-activity-v1";
 const THEME_KEY = "shop-inventory-ai-theme-v1";
 const ORDER_HISTORY_KEY = "shop-inventory-ai-order-history-v1";
@@ -47,6 +48,7 @@ const state = {
   selectedPosCategory: "all",
   posProducts: [],
   posCart: [],
+  posHeldOrders: [],
   posSales: [],
   posToday: { transactions: 0, revenue: 0, soldItems: [] },
   posForecast: { projectedRevenue: 0, confidence: "시작", daysLearned: 0, transactions: 0 },
@@ -81,18 +83,23 @@ const elements = {
   posTransactions: $("posTransactions"),
   posForecast: $("posForecast"),
   posConfidence: $("posConfidence"),
+  posAverageTicket: $("posAverageTicket"),
+  posTopProduct: $("posTopProduct"),
   posSearch: $("posSearch"),
   posCategoryTabs: $("posCategoryTabs"),
   posProductGrid: $("posProductGrid"),
   posCartSummary: $("posCartSummary"),
   posCartList: $("posCartList"),
+  posDiscount: $("posDiscount"),
   posCartTotal: $("posCartTotal"),
+  posReceiptPreview: $("posReceiptPreview"),
   posEditProduct: $("posEditProduct"),
   posEditName: $("posEditName"),
   posEditCategory: $("posEditCategory"),
   posEditPrice: $("posEditPrice"),
   posIngredientList: $("posIngredientList"),
   posRecentSales: $("posRecentSales"),
+  posPaymentMix: $("posPaymentMix"),
   itemModal: $("itemModal"),
   editItemName: $("editItemName"),
   editItemCategory: $("editItemCategory"),
@@ -284,6 +291,20 @@ function writePosLocal() {
   }));
 }
 
+function readPosHeldOrders() {
+  try {
+    const data = JSON.parse(localStorage.getItem(POS_HOLD_KEY));
+    return Array.isArray(data) ? data.slice(0, 8) : [];
+  } catch (error) {
+    localStorage.removeItem(POS_HOLD_KEY);
+    return [];
+  }
+}
+
+function writePosHeldOrders() {
+  localStorage.setItem(POS_HOLD_KEY, JSON.stringify(state.posHeldOrders.slice(0, 8)));
+}
+
 function getLocalPosDashboard() {
   const todayKey = getTodayKey();
   const todaySales = state.posSales.filter((sale) => String(sale.sold_at || "").slice(0, 10) === todayKey);
@@ -312,7 +333,10 @@ function getLocalPosDashboard() {
       date: todayKey,
       transactions: todaySales.length,
       revenue: todaySales.reduce((sum, sale) => sum + Number(sale.total || 0), 0),
-      soldItems: Array.from(soldMap.values()).sort((a, b) => b.qty - a.qty).slice(0, 8)
+      averageTicket: todaySales.length ? todaySales.reduce((sum, sale) => sum + Number(sale.total || 0), 0) / todaySales.length : 0,
+      soldItems: Array.from(soldMap.values()).sort((a, b) => b.qty - a.qty).slice(0, 8),
+      paymentMix: buildLocalPaymentMix(todaySales),
+      hourly: buildLocalHourlySales(todaySales)
     },
     forecast: {
       projectedRevenue,
@@ -323,6 +347,30 @@ function getLocalPosDashboard() {
     ingredientUsage: buildLocalIngredientUsage(),
     recentSales: state.posSales.slice(0, 10)
   };
+}
+
+function buildLocalPaymentMix(sales) {
+  const mix = new Map();
+  for (const sale of sales) {
+    const method = sale.payment_method || "payment";
+    const current = mix.get(method) || { method, transactions: 0, total: 0 };
+    current.transactions += 1;
+    current.total += Number(sale.total || 0);
+    mix.set(method, current);
+  }
+  return Array.from(mix.values()).sort((a, b) => b.total - a.total);
+}
+
+function buildLocalHourlySales(sales) {
+  const hourly = new Map();
+  for (const sale of sales) {
+    const hour = String(sale.sold_at || "").slice(11, 13) || "--";
+    const current = hourly.get(hour) || { hour, transactions: 0, total: 0 };
+    current.transactions += 1;
+    current.total += Number(sale.total || 0);
+    hourly.set(hour, current);
+  }
+  return Array.from(hourly.values()).sort((a, b) => String(a.hour).localeCompare(String(b.hour)));
 }
 
 function buildLocalIngredientUsage() {
@@ -842,7 +890,20 @@ function getPosCategories() {
 }
 
 function getPosCartTotal() {
+  return Math.max(0, getPosCartSubtotal() - getPosDiscount());
+}
+
+function getPosCartSubtotal() {
   return state.posCart.reduce((sum, line) => sum + Number(line.price || 0) * Number(line.qty || 0), 0);
+}
+
+function getPosDiscount() {
+  return Math.max(0, Number(elements.posDiscount.value || 0));
+}
+
+function formatPaymentMethod(method) {
+  const labels = { cash: "Cash", card: "Card", eftpos: "EFTPOS" };
+  return labels[method] || method || "Payment";
 }
 
 function renderPosTabs() {
@@ -920,6 +981,24 @@ function renderPosCart() {
   }
 
   elements.posCartTotal.textContent = money(getPosCartTotal());
+  renderPosReceipt();
+}
+
+function renderPosReceipt() {
+  const lines = ["Sushi Shop POS", new Date().toLocaleString("ko-NZ", { dateStyle: "short", timeStyle: "short" }), ""];
+  if (!state.posCart.length) {
+    lines.push("상품을 선택하세요.");
+  } else {
+    for (const item of state.posCart) {
+      lines.push(`${item.name}`);
+      lines.push(`  ${item.qty} x ${money(item.price)} = ${money(item.qty * item.price)}`);
+    }
+    lines.push("");
+    lines.push(`Subtotal: ${money(getPosCartSubtotal())}`);
+    if (getPosDiscount() > 0) lines.push(`Discount: -${money(getPosDiscount())}`);
+    lines.push(`Total: ${money(getPosCartTotal())}`);
+  }
+  elements.posReceiptPreview.value = lines.join("\n");
 }
 
 function renderPosEditForm() {
@@ -951,6 +1030,9 @@ function renderPosInsights() {
   elements.posTransactions.textContent = String(state.posToday.transactions || 0);
   elements.posForecast.textContent = money(state.posForecast.projectedRevenue);
   elements.posConfidence.textContent = state.posForecast.confidence || "시작";
+  elements.posAverageTicket.textContent = money(state.posToday.averageTicket);
+  const topProduct = (state.posToday.soldItems || [])[0];
+  elements.posTopProduct.textContent = topProduct ? topProduct.name : "-";
 
   elements.posIngredientList.innerHTML = "";
   if (!state.posIngredientUsage.length) {
@@ -986,11 +1068,52 @@ function renderPosInsights() {
     row.innerHTML = `
       <div>
         <strong>${money(sale.total)}</strong>
-        <span>${new Date(sale.sold_at).toLocaleString("ko-NZ", { dateStyle: "short", timeStyle: "short" })} · ${sale.payment_method || "payment"}</span>
+        <span>${new Date(sale.sold_at).toLocaleString("ko-NZ", { dateStyle: "short", timeStyle: "short" })} · ${formatPaymentMethod(sale.payment_method)}</span>
       </div>
       <strong>${itemCount}개</strong>
     `;
     elements.posRecentSales.append(row);
+  }
+
+  renderPosPaymentMix();
+}
+
+function renderPosPaymentMix() {
+  elements.posPaymentMix.innerHTML = "";
+  const paymentMix = state.posToday.paymentMix || [];
+  const peakHour = (state.posToday.hourly || []).slice().sort((a, b) => Number(b.total || 0) - Number(a.total || 0))[0];
+  if (!paymentMix.length && !peakHour) {
+    const empty = document.createElement("div");
+    empty.className = "empty-state";
+    empty.textContent = "오늘 판매가 기록되면 결제 분석이 표시됩니다.";
+    elements.posPaymentMix.append(empty);
+    return;
+  }
+
+  for (const item of paymentMix) {
+    const row = document.createElement("div");
+    row.className = "ingredient-row";
+    row.innerHTML = `
+      <div>
+        <strong>${formatPaymentMethod(item.method)}</strong>
+        <span>${item.transactions}건 결제</span>
+      </div>
+      <strong>${money(item.total)}</strong>
+    `;
+    elements.posPaymentMix.append(row);
+  }
+
+  if (peakHour) {
+    const row = document.createElement("div");
+    row.className = "ingredient-row";
+    row.innerHTML = `
+      <div>
+        <strong>피크 시간</strong>
+        <span>${peakHour.hour}:00대 · ${peakHour.transactions}건</span>
+      </div>
+      <strong>${money(peakHour.total)}</strong>
+    `;
+    elements.posPaymentMix.append(row);
   }
 }
 
@@ -1143,9 +1266,12 @@ async function checkoutPos(paymentMethod) {
     return;
   }
 
-  const totalBeforeClear = getPosCartTotal();
+  const subtotalBeforeClear = getPosCartSubtotal();
+  const discountBeforeClear = Math.min(getPosDiscount(), subtotalBeforeClear);
+  const totalBeforeClear = Math.max(0, subtotalBeforeClear - discountBeforeClear);
   const payload = {
     paymentMethod,
+    discount: discountBeforeClear,
     items: state.posCart.map((item) => ({ productId: item.id, qty: item.qty }))
   };
 
@@ -1161,6 +1287,8 @@ async function checkoutPos(paymentMethod) {
       id: soldAt,
       sold_at: soldAt,
       payment_method: paymentMethod,
+      subtotal: Number(subtotalBeforeClear.toFixed(2)),
+      discount: Number(discountBeforeClear.toFixed(2)),
       total: Number(totalBeforeClear.toFixed(2)),
       items: state.posCart.map((item) => ({
         name: item.name,
@@ -1176,10 +1304,50 @@ async function checkoutPos(paymentMethod) {
   }
 
   state.posCart = [];
+  elements.posDiscount.value = "0";
   logActivity(`POS ${paymentMethod} 결제 ${money(totalBeforeClear)}`);
   showToast("POS 판매가 저장되고 학습되었습니다.");
   render();
   renderPos();
+}
+
+function holdPosOrder() {
+  if (!state.posCart.length) {
+    showToast("보류할 POS 주문이 없습니다.");
+    return;
+  }
+  const stamp = new Date();
+  state.posHeldOrders.unshift({
+    id: stamp.toISOString(),
+    label: `${stamp.toLocaleTimeString("ko-NZ", { hour: "2-digit", minute: "2-digit" })} · ${state.posCart.length}개 라인 · ${money(getPosCartTotal())}`,
+    discount: getPosDiscount(),
+    items: state.posCart.map((item) => ({ ...item }))
+  });
+  state.posHeldOrders = state.posHeldOrders.slice(0, 8);
+  writePosHeldOrders();
+  state.posCart = [];
+  elements.posDiscount.value = "0";
+  showToast("현재 주문을 보류했습니다.");
+  renderPos();
+}
+
+function recallPosOrder() {
+  if (!state.posHeldOrders.length) {
+    showToast("불러올 보류 주문이 없습니다.");
+    return;
+  }
+  const order = state.posHeldOrders.shift();
+  state.posCart = order.items.map((item) => ({ ...item }));
+  elements.posDiscount.value = String(order.discount || 0);
+  writePosHeldOrders();
+  showToast(`보류 주문을 불러왔습니다: ${order.label}`);
+  renderPos();
+}
+
+async function copyPosReceipt() {
+  renderPosReceipt();
+  await navigator.clipboard.writeText(elements.posReceiptPreview.value);
+  showToast("POS 영수증 내용을 복사했습니다.");
 }
 
 async function savePosProduct() {
@@ -1758,8 +1926,12 @@ function bindEvents() {
   $("completeOrderBtn").addEventListener("click", () => completeOrder().catch((error) => showToast(error.message)));
   $("clearPosCartBtn").addEventListener("click", () => {
     state.posCart = [];
+    elements.posDiscount.value = "0";
     renderPosCart();
   });
+  $("holdPosOrderBtn").addEventListener("click", holdPosOrder);
+  $("recallPosOrderBtn").addEventListener("click", recallPosOrder);
+  $("copyPosReceiptBtn").addEventListener("click", () => copyPosReceipt().catch((error) => showToast(error.message)));
   $("payCashBtn").addEventListener("click", () => checkoutPos("cash").catch((error) => showToast(error.message)));
   $("payCardBtn").addEventListener("click", () => checkoutPos("card").catch((error) => showToast(error.message)));
   $("payEftposBtn").addEventListener("click", () => checkoutPos("eftpos").catch((error) => showToast(error.message)));
@@ -1814,6 +1986,7 @@ function bindEvents() {
   });
 
   elements.posSearch.addEventListener("input", renderPosProducts);
+  elements.posDiscount.addEventListener("input", renderPosCart);
   elements.posEditProduct.addEventListener("change", syncPosEditForm);
 
   elements.orderHistoryList.addEventListener("click", async (event) => {
@@ -1909,6 +2082,7 @@ function bindEvents() {
 bindEvents();
 state.activities = readActivities();
 state.orderHistory = readOrderHistory();
+state.posHeldOrders = readPosHeldOrders();
 loadTheme();
 loadData();
 loadPosData();

@@ -1,0 +1,1 @@
+ALTER TABLE pos_sales ADD COLUMN discount REAL NOT NULL DEFAULT 0;
