@@ -1,5 +1,7 @@
 const API_URL = "/api/inventory";
+const POS_API_URL = "/api/pos";
 const LOCAL_KEY = "shop-inventory-ai-local-v2";
+const POS_LOCAL_KEY = "shop-inventory-ai-pos-local-v1";
 const ACTIVITY_KEY = "shop-inventory-ai-activity-v1";
 const THEME_KEY = "shop-inventory-ai-theme-v1";
 const ORDER_HISTORY_KEY = "shop-inventory-ai-order-history-v1";
@@ -15,6 +17,22 @@ const DEFAULT_CATEGORIES = [
   { id: 8, name: "음료수", items: [["콜라", 0], ["콜라 제로", 0], ["스프라이트", 0], ["환타", 0], ["물", 0], ["주스", 0], ["아이스티", 0], ["캔음료", 0], ["병음료", 0]] }
 ];
 
+const POS_PRODUCTS = [
+  ...["Salmon Avocado CreamCheese", "Salmon Avocado", "Cook Salmon", "Spicy Chicken", "Crispy Chicken", "Crispy Chicken CreamCheese", "Teriyaki Chicken", "Teriyaki Chicken CreamCheese", "Egg Teriyaki Chicken", "Crispy Pork", "Spicy Pork", "Crumb Prawn", "Spicy Prawn", "Tuna Mayo", "Pineapple Cream Cheese", "Avocado", "Surumi", "Seaweed", "mini"]
+    .map((name, index) => ({ id: index + 1, category: "Sushi Roll", name, price: 1.8, active: 1, sort_order: index })),
+  { id: 101, category: "Nigiri / Inari", name: "Salmon Nigiri", price: 2.7, active: 1, sort_order: 100 },
+  { id: 102, category: "Nigiri / Inari", name: "Premium Salmon Nigiri", price: 3.2, active: 1, sort_order: 101 },
+  { id: 103, category: "Nigiri / Inari", name: "Inari", price: 2.5, active: 1, sort_order: 102 },
+  { id: 104, category: "Nigiri / Inari", name: "Egg Nigiri", price: 2.5, active: 1, sort_order: 103 },
+  { id: 105, category: "Nigiri / Inari", name: "Prawn Nigiri", price: 2.5, active: 1, sort_order: 104 },
+  { id: 106, category: "Nigiri / Inari", name: "Tuna Nigiri", price: 2.5, active: 1, sort_order: 105 },
+  { id: 201, category: "Fried", name: "Fried $1.8", price: 1.8, active: 1, sort_order: 200 },
+  { id: 202, category: "Fried", name: "Fried $2.0", price: 2.0, active: 1, sort_order: 201 },
+  { id: 203, category: "Fried", name: "Fried $4.2", price: 4.2, active: 1, sort_order: 202 },
+  { id: 204, category: "Fried", name: "Fried $4.5", price: 4.5, active: 1, sort_order: 203 },
+  { id: 205, category: "Fried", name: "Fried $4.7", price: 4.7, active: 1, sort_order: 204 }
+];
+
 const state = {
   categories: [],
   predictions: [],
@@ -26,6 +44,13 @@ const state = {
   orderOnly: false,
   selectedCategory: "all",
   selectedOrderGroup: "all",
+  selectedPosCategory: "all",
+  posProducts: [],
+  posCart: [],
+  posSales: [],
+  posToday: { transactions: 0, revenue: 0, soldItems: [] },
+  posForecast: { projectedRevenue: 0, confidence: "시작", daysLearned: 0, transactions: 0 },
+  posIngredientUsage: [],
   editingItemId: null,
   activities: [],
   orderHistory: [],
@@ -51,6 +76,23 @@ const elements = {
   orderCenterContent: $("orderCenterContent"),
   orderCenterPreview: $("orderCenterPreview"),
   orderCenterSummary: $("orderCenterSummary"),
+  posModal: $("posModal"),
+  posRevenue: $("posRevenue"),
+  posTransactions: $("posTransactions"),
+  posForecast: $("posForecast"),
+  posConfidence: $("posConfidence"),
+  posSearch: $("posSearch"),
+  posCategoryTabs: $("posCategoryTabs"),
+  posProductGrid: $("posProductGrid"),
+  posCartSummary: $("posCartSummary"),
+  posCartList: $("posCartList"),
+  posCartTotal: $("posCartTotal"),
+  posEditProduct: $("posEditProduct"),
+  posEditName: $("posEditName"),
+  posEditCategory: $("posEditCategory"),
+  posEditPrice: $("posEditPrice"),
+  posIngredientList: $("posIngredientList"),
+  posRecentSales: $("posRecentSales"),
   itemModal: $("itemModal"),
   editItemName: $("editItemName"),
   editItemCategory: $("editItemCategory"),
@@ -202,6 +244,136 @@ async function api(path = "", options = {}) {
   }
 
   return response.json();
+}
+
+async function posApi(path = "", options = {}) {
+  const response = await fetch(`${POS_API_URL}${path}`, {
+    headers: { "content-type": "application/json" },
+    ...options
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.error || "POS API error");
+  }
+
+  return response.json();
+}
+
+function money(value) {
+  return `$${Number(value || 0).toFixed(2)}`;
+}
+
+function readPosLocal() {
+  try {
+    const data = JSON.parse(localStorage.getItem(POS_LOCAL_KEY));
+    return {
+      products: Array.isArray(data?.products) ? data.products : POS_PRODUCTS,
+      sales: Array.isArray(data?.sales) ? data.sales : []
+    };
+  } catch (error) {
+    localStorage.removeItem(POS_LOCAL_KEY);
+    return { products: POS_PRODUCTS, sales: [] };
+  }
+}
+
+function writePosLocal() {
+  localStorage.setItem(POS_LOCAL_KEY, JSON.stringify({
+    products: state.posProducts,
+    sales: state.posSales.slice(0, 300)
+  }));
+}
+
+function getLocalPosDashboard() {
+  const todayKey = getTodayKey();
+  const todaySales = state.posSales.filter((sale) => String(sale.sold_at || "").slice(0, 10) === todayKey);
+  const allLines = todaySales.flatMap((sale) => sale.items || []);
+  const soldMap = new Map();
+  for (const line of allLines) {
+    const key = `${line.category}:${line.name}`;
+    const current = soldMap.get(key) || { name: line.name, category: line.category, qty: 0, total: 0 };
+    current.qty += Number(line.qty || 0);
+    current.total += Number(line.line_total || line.lineTotal || 0);
+    soldMap.set(key, current);
+  }
+
+  const daily = new Map();
+  for (const sale of state.posSales) {
+    const day = String(sale.sold_at || "").slice(0, 10);
+    if (!day) continue;
+    daily.set(day, (daily.get(day) || 0) + Number(sale.total || 0));
+  }
+  const dailyRevenue = Array.from(daily.values()).slice(-14);
+  const projectedRevenue = dailyRevenue.length ? average(dailyRevenue) : 0;
+
+  return {
+    products: state.posProducts,
+    today: {
+      date: todayKey,
+      transactions: todaySales.length,
+      revenue: todaySales.reduce((sum, sale) => sum + Number(sale.total || 0), 0),
+      soldItems: Array.from(soldMap.values()).sort((a, b) => b.qty - a.qty).slice(0, 8)
+    },
+    forecast: {
+      projectedRevenue,
+      confidence: state.posSales.length >= 80 ? "높음" : state.posSales.length >= 25 ? "보통" : state.posSales.length > 0 ? "낮음" : "시작",
+      daysLearned: dailyRevenue.length,
+      transactions: state.posSales.length
+    },
+    ingredientUsage: buildLocalIngredientUsage(),
+    recentSales: state.posSales.slice(0, 10)
+  };
+}
+
+function buildLocalIngredientUsage() {
+  const usage = new Map();
+  for (const sale of state.posSales.slice(0, 100)) {
+    for (const line of sale.items || []) {
+      const key = `${line.category}:${line.name}`;
+      const current = usage.get(key) || { label: line.name, category: line.category, qty: 0 };
+      current.qty += Number(line.qty || 0);
+      usage.set(key, current);
+    }
+  }
+  return Array.from(usage.values())
+    .sort((a, b) => b.qty - a.qty)
+    .slice(0, 12)
+    .map((item) => ({ ...item, hint: buildIngredientHint(item.label, item.category, item.qty) }));
+}
+
+function buildIngredientHint(name, category, qty) {
+  const lower = String(name).toLowerCase();
+  if (lower.includes("salmon")) return `연어 사용 기준 ${qty}개 판매`;
+  if (lower.includes("chicken")) return `치킨 사용 기준 ${qty}개 판매`;
+  if (lower.includes("prawn")) return `새우 사용 기준 ${qty}개 판매`;
+  if (lower.includes("cream")) return `크림치즈 포함 ${qty}개 판매`;
+  if (category === "Fried") return `튀김류 ${qty}개 판매`;
+  return `${category} ${qty}개 판매`;
+}
+
+function applyPosDashboard(data) {
+  state.posProducts = (data.products || POS_PRODUCTS).map((product) => ({
+    ...product,
+    id: Number(product.id),
+    price: Number(product.price || 0)
+  }));
+  state.posToday = data.today || { transactions: 0, revenue: 0, soldItems: [] };
+  state.posForecast = data.forecast || { projectedRevenue: 0, confidence: "시작", daysLearned: 0, transactions: 0 };
+  state.posIngredientUsage = data.ingredientUsage || [];
+  state.posSales = data.recentSales || state.posSales || [];
+}
+
+async function loadPosData() {
+  try {
+    const data = await posApi();
+    applyPosDashboard(data);
+  } catch (error) {
+    const local = readPosLocal();
+    state.posProducts = local.products;
+    state.posSales = local.sales;
+    applyPosDashboard(getLocalPosDashboard());
+  }
+  renderPos();
 }
 
 function average(values) {
@@ -665,6 +837,171 @@ function renderOrderCenter() {
   elements.orderCenterPreview.value = formatOrderGroup(selected);
 }
 
+function getPosCategories() {
+  return ["all", ...new Set(state.posProducts.map((product) => product.category))];
+}
+
+function getPosCartTotal() {
+  return state.posCart.reduce((sum, line) => sum + Number(line.price || 0) * Number(line.qty || 0), 0);
+}
+
+function renderPosTabs() {
+  elements.posCategoryTabs.innerHTML = "";
+  for (const category of getPosCategories()) {
+    const button = document.createElement("button");
+    button.className = `tab-btn${category === state.selectedPosCategory ? " active" : ""}`;
+    button.type = "button";
+    button.dataset.posCategory = category;
+    button.textContent = category === "all" ? "전체" : category;
+    elements.posCategoryTabs.append(button);
+  }
+}
+
+function renderPosProducts() {
+  const query = normalizeName(elements.posSearch.value).toLowerCase();
+  const products = state.posProducts.filter((product) => {
+    const categoryMatch = state.selectedPosCategory === "all" || product.category === state.selectedPosCategory;
+    const searchMatch = !query || `${product.name} ${product.category}`.toLowerCase().includes(query);
+    return categoryMatch && searchMatch;
+  });
+
+  elements.posProductGrid.innerHTML = "";
+  if (!products.length) {
+    const empty = document.createElement("div");
+    empty.className = "empty-state";
+    empty.textContent = "표시할 POS 상품이 없습니다.";
+    elements.posProductGrid.append(empty);
+    return;
+  }
+
+  for (const product of products) {
+    const button = document.createElement("button");
+    button.className = "btn pos-product";
+    button.type = "button";
+    button.dataset.posProductId = product.id;
+    button.innerHTML = `
+      <strong>${product.name}</strong>
+      <span>${product.category}</span>
+      <b>${money(product.price)}</b>
+    `;
+    elements.posProductGrid.append(button);
+  }
+}
+
+function renderPosCart() {
+  elements.posCartList.innerHTML = "";
+  elements.posCartSummary.textContent = state.posCart.length
+    ? `${state.posCart.reduce((sum, item) => sum + item.qty, 0)}개 상품`
+    : "상품을 선택하세요.";
+
+  if (!state.posCart.length) {
+    const empty = document.createElement("div");
+    empty.className = "empty-state";
+    empty.textContent = "상품을 누르면 주문에 추가됩니다.";
+    elements.posCartList.append(empty);
+  }
+
+  for (const item of state.posCart) {
+    const row = document.createElement("div");
+    row.className = "pos-cart-row";
+    row.dataset.posCartId = item.id;
+    row.innerHTML = `
+      <div>
+        <strong class="pos-cart-name">${item.name}</strong>
+        <span class="pos-cart-meta">${item.qty} x ${money(item.price)} = ${money(item.qty * item.price)}</span>
+      </div>
+      <div class="pos-cart-controls">
+        <button class="btn small" type="button" data-pos-cart-action="minus">-</button>
+        <strong>${item.qty}</strong>
+        <button class="btn small" type="button" data-pos-cart-action="plus">+</button>
+      </div>
+    `;
+    elements.posCartList.append(row);
+  }
+
+  elements.posCartTotal.textContent = money(getPosCartTotal());
+}
+
+function renderPosEditForm() {
+  const previous = elements.posEditProduct.value;
+  elements.posEditProduct.innerHTML = "";
+  for (const product of state.posProducts) {
+    const option = document.createElement("option");
+    option.value = product.id;
+    option.textContent = `${product.name} - ${money(product.price)}`;
+    elements.posEditProduct.append(option);
+  }
+  if (previous && state.posProducts.some((product) => String(product.id) === previous)) {
+    elements.posEditProduct.value = previous;
+  }
+  syncPosEditForm();
+}
+
+function syncPosEditForm() {
+  const product = state.posProducts.find((entry) => String(entry.id) === String(elements.posEditProduct.value)) || state.posProducts[0];
+  if (!product) return;
+  elements.posEditProduct.value = product.id;
+  elements.posEditName.value = product.name;
+  elements.posEditCategory.value = product.category;
+  elements.posEditPrice.value = Number(product.price || 0).toFixed(2);
+}
+
+function renderPosInsights() {
+  elements.posRevenue.textContent = money(state.posToday.revenue);
+  elements.posTransactions.textContent = String(state.posToday.transactions || 0);
+  elements.posForecast.textContent = money(state.posForecast.projectedRevenue);
+  elements.posConfidence.textContent = state.posForecast.confidence || "시작";
+
+  elements.posIngredientList.innerHTML = "";
+  if (!state.posIngredientUsage.length) {
+    const empty = document.createElement("div");
+    empty.className = "empty-state";
+    empty.textContent = "판매를 기록하면 재료 사용 패턴이 표시됩니다.";
+    elements.posIngredientList.append(empty);
+  }
+  for (const item of state.posIngredientUsage) {
+    const row = document.createElement("div");
+    row.className = "ingredient-row";
+    row.innerHTML = `
+      <div>
+        <strong>${item.label}</strong>
+        <span>${item.hint || `${item.category} ${item.qty}개 판매`}</span>
+      </div>
+      <strong>${item.qty}</strong>
+    `;
+    elements.posIngredientList.append(row);
+  }
+
+  elements.posRecentSales.innerHTML = "";
+  if (!state.posSales.length) {
+    const empty = document.createElement("div");
+    empty.className = "empty-state";
+    empty.textContent = "아직 판매 기록이 없습니다.";
+    elements.posRecentSales.append(empty);
+  }
+  for (const sale of state.posSales.slice(0, 8)) {
+    const row = document.createElement("div");
+    row.className = "pos-sale-row";
+    const itemCount = (sale.items || []).reduce((sum, item) => sum + Number(item.qty || 0), 0);
+    row.innerHTML = `
+      <div>
+        <strong>${money(sale.total)}</strong>
+        <span>${new Date(sale.sold_at).toLocaleString("ko-NZ", { dateStyle: "short", timeStyle: "short" })} · ${sale.payment_method || "payment"}</span>
+      </div>
+      <strong>${itemCount}개</strong>
+    `;
+    elements.posRecentSales.append(row);
+  }
+}
+
+function renderPos() {
+  renderPosTabs();
+  renderPosProducts();
+  renderPosCart();
+  renderPosEditForm();
+  renderPosInsights();
+}
+
 function renderInventory() {
   const query = elements.searchInput.value.trim().toLowerCase();
   elements.inventory.innerHTML = "";
@@ -760,10 +1097,121 @@ function render() {
   renderRecommendations();
   renderInventory();
   renderOrderCenter();
+  renderPosInsights();
   updatePreview();
   elements.toggleZeroBtn.textContent = state.hideZero ? "0개 숨김" : "0개 표시";
   elements.orderOnlyBtn.textContent = state.orderOnly ? "전체 보기" : "발주만";
   elements.undoBtn.disabled = !state.history.length;
+}
+
+function openPos() {
+  elements.posModal.classList.add("open");
+  elements.posModal.setAttribute("aria-hidden", "false");
+  loadPosData().catch((error) => showToast(error.message));
+}
+
+function closePos() {
+  elements.posModal.classList.remove("open");
+  elements.posModal.setAttribute("aria-hidden", "true");
+}
+
+function addPosProduct(productId) {
+  const product = state.posProducts.find((entry) => Number(entry.id) === Number(productId));
+  if (!product) return;
+  const existing = state.posCart.find((entry) => Number(entry.id) === Number(product.id));
+  if (existing) {
+    existing.qty += 1;
+  } else {
+    state.posCart.push({ id: product.id, name: product.name, category: product.category, price: Number(product.price), qty: 1 });
+  }
+  renderPosCart();
+}
+
+function updatePosCart(productId, delta) {
+  const item = state.posCart.find((entry) => Number(entry.id) === Number(productId));
+  if (!item) return;
+  item.qty += delta;
+  if (item.qty <= 0) {
+    state.posCart = state.posCart.filter((entry) => Number(entry.id) !== Number(productId));
+  }
+  renderPosCart();
+}
+
+async function checkoutPos(paymentMethod) {
+  if (!state.posCart.length) {
+    showToast("POS 주문이 비어 있습니다.");
+    return;
+  }
+
+  const totalBeforeClear = getPosCartTotal();
+  const payload = {
+    paymentMethod,
+    items: state.posCart.map((item) => ({ productId: item.id, qty: item.qty }))
+  };
+
+  try {
+    const result = await posApi("?action=sale", {
+      method: "POST",
+      body: JSON.stringify(payload)
+    });
+    applyPosDashboard(result.dashboard);
+  } catch (error) {
+    const soldAt = new Date().toISOString();
+    const sale = {
+      id: soldAt,
+      sold_at: soldAt,
+      payment_method: paymentMethod,
+      total: Number(totalBeforeClear.toFixed(2)),
+      items: state.posCart.map((item) => ({
+        name: item.name,
+        category: item.category,
+        qty: item.qty,
+        unit_price: item.price,
+        line_total: Number((item.qty * item.price).toFixed(2))
+      }))
+    };
+    state.posSales.unshift(sale);
+    writePosLocal();
+    applyPosDashboard(getLocalPosDashboard());
+  }
+
+  state.posCart = [];
+  logActivity(`POS ${paymentMethod} 결제 ${money(totalBeforeClear)}`);
+  showToast("POS 판매가 저장되고 학습되었습니다.");
+  render();
+  renderPos();
+}
+
+async function savePosProduct() {
+  const id = Number(elements.posEditProduct.value);
+  const product = state.posProducts.find((entry) => Number(entry.id) === id);
+  if (!product) return;
+
+  const updated = {
+    id,
+    name: normalizeName(elements.posEditName.value),
+    category: normalizeName(elements.posEditCategory.value),
+    price: Number(elements.posEditPrice.value)
+  };
+  if (!updated.name || !updated.category || Number.isNaN(updated.price) || updated.price < 0) {
+    showToast("상품명, 카테고리, 가격을 확인하세요.");
+    return;
+  }
+
+  try {
+    const result = await posApi("?action=update-product", {
+      method: "POST",
+      body: JSON.stringify(updated)
+    });
+    applyPosDashboard(result.dashboard);
+  } catch (error) {
+    Object.assign(product, updated);
+    writePosLocal();
+    applyPosDashboard(getLocalPosDashboard());
+  }
+
+  showToast("POS 상품 가격이 저장되었습니다.");
+  renderPos();
 }
 
 function findItem(itemId) {
@@ -1293,6 +1741,9 @@ function bindEvents() {
   $("copyBidfoodBtn").addEventListener("click", copyBidfoodOrder);
   $("downloadBidfoodBtn").addEventListener("click", downloadBidfoodCsv);
   $("showBidfoodBtn").addEventListener("click", showBidfoodOnly);
+  $("openPosBtn").addEventListener("click", openPos);
+  $("bottomPosBtn").addEventListener("click", openPos);
+  $("closePosBtn").addEventListener("click", closePos);
   $("openOrderCenterBtn").addEventListener("click", openOrderCenter);
   $("bottomOrderCenterBtn").addEventListener("click", openOrderCenter);
   $("closeOrderCenterBtn").addEventListener("click", closeOrderCenter);
@@ -1305,6 +1756,14 @@ function bindEvents() {
   $("copyOrderCenterBtn").addEventListener("click", () => copyOrderCenter().catch((error) => showToast(error.message)));
   $("downloadOrderCenterBtn").addEventListener("click", downloadOrderCenterCsv);
   $("completeOrderBtn").addEventListener("click", () => completeOrder().catch((error) => showToast(error.message)));
+  $("clearPosCartBtn").addEventListener("click", () => {
+    state.posCart = [];
+    renderPosCart();
+  });
+  $("payCashBtn").addEventListener("click", () => checkoutPos("cash").catch((error) => showToast(error.message)));
+  $("payCardBtn").addEventListener("click", () => checkoutPos("card").catch((error) => showToast(error.message)));
+  $("payEftposBtn").addEventListener("click", () => checkoutPos("eftpos").catch((error) => showToast(error.message)));
+  $("savePosProductBtn").addEventListener("click", () => savePosProduct().catch((error) => showToast(error.message)));
   $("zeroAllBtn").addEventListener("click", () => zeroAll().catch((error) => showToast(error.message)));
   $("restoreBtn").addEventListener("click", restoreDefaults);
   $("undoBtn").addEventListener("click", undoLastChange);
@@ -1333,6 +1792,30 @@ function bindEvents() {
     renderOrderCenter();
   });
 
+  elements.posCategoryTabs.addEventListener("click", (event) => {
+    const tab = event.target.closest("[data-pos-category]");
+    if (!tab) return;
+    state.selectedPosCategory = tab.dataset.posCategory;
+    renderPosProducts();
+    renderPosTabs();
+  });
+
+  elements.posProductGrid.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-pos-product-id]");
+    if (!button) return;
+    addPosProduct(Number(button.dataset.posProductId));
+  });
+
+  elements.posCartList.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-pos-cart-action]");
+    if (!button) return;
+    const row = button.closest("[data-pos-cart-id]");
+    updatePosCart(Number(row.dataset.posCartId), button.dataset.posCartAction === "plus" ? 1 : -1);
+  });
+
+  elements.posSearch.addEventListener("input", renderPosProducts);
+  elements.posEditProduct.addEventListener("change", syncPosEditForm);
+
   elements.orderHistoryList.addEventListener("click", async (event) => {
     const button = event.target.closest("[data-history-copy]");
     if (!button) return;
@@ -1346,6 +1829,10 @@ function bindEvents() {
     if (event.target === elements.orderModal) closeOrderCenter();
   });
 
+  elements.posModal.addEventListener("click", (event) => {
+    if (event.target === elements.posModal) closePos();
+  });
+
   elements.itemModal.addEventListener("click", (event) => {
     if (event.target === elements.itemModal) closeItemModal();
   });
@@ -1353,6 +1840,9 @@ function bindEvents() {
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape" && elements.orderModal.classList.contains("open")) {
       closeOrderCenter();
+    }
+    if (event.key === "Escape" && elements.posModal.classList.contains("open")) {
+      closePos();
     }
     if (event.key === "Escape" && elements.itemModal.classList.contains("open")) {
       closeItemModal();
@@ -1421,3 +1911,4 @@ state.activities = readActivities();
 state.orderHistory = readOrderHistory();
 loadTheme();
 loadData();
+loadPosData();

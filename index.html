@@ -32,6 +32,7 @@
         <button class="btn" id="shareBtn" type="button">공유</button>
         <button class="btn success" id="saveRecordBtn" type="button">오늘 저장/학습</button>
         <button class="btn" id="applyPredictBtn" type="button">AI 예측 적용</button>
+        <button class="btn success" id="openPosBtn" type="button">POS 열기</button>
         <button class="btn primary ghost" id="openOrderCenterBtn" type="button">발주 센터</button>
         <button class="btn" id="themeToggleBtn" type="button">다크모드</button>
       </div>
@@ -158,12 +159,113 @@
   </main>
 
   <nav class="bottom-bar">
+    <button class="btn success" id="bottomPosBtn" type="button">POS</button>
     <button class="btn primary" id="bottomOrderCenterBtn" type="button">발주 센터</button>
     <button class="btn danger" id="zeroAllBtn" type="button">전체 0으로</button>
     <button class="btn" id="restoreBtn" type="button">기본 리스트 복구</button>
   </nav>
 
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+  <section class="modal-backdrop" id="posModal" aria-hidden="true">
+    <div class="pos-modal" role="dialog" aria-modal="true" aria-labelledby="posModalTitle">
+      <div class="modal-head">
+        <div>
+          <div class="eyebrow">Sushi POS Intelligence</div>
+          <h2 id="posModalTitle">POS 센터</h2>
+          <p>판매를 기록하면 매출 리포트, 예측, 재료 사용 데이터가 함께 학습됩니다.</p>
+        </div>
+        <button class="icon-btn" id="closePosBtn" type="button" aria-label="닫기">×</button>
+      </div>
+
+      <div class="pos-metrics">
+        <div class="metric-card compact">
+          <span>오늘 매출</span>
+          <strong id="posRevenue">$0.00</strong>
+        </div>
+        <div class="metric-card compact">
+          <span>오늘 결제</span>
+          <strong id="posTransactions">0</strong>
+        </div>
+        <div class="metric-card compact">
+          <span>예상 매출</span>
+          <strong id="posForecast">$0.00</strong>
+        </div>
+        <div class="metric-card compact">
+          <span>학습 신뢰도</span>
+          <strong id="posConfidence">시작</strong>
+        </div>
+      </div>
+
+      <div class="pos-layout">
+        <section class="pos-products">
+          <div class="pos-toolbar">
+            <input id="posSearch" type="search" placeholder="POS 상품 검색" autocomplete="off" />
+            <div class="order-tabs" id="posCategoryTabs"></div>
+          </div>
+          <div class="pos-product-grid" id="posProductGrid"></div>
+        </section>
+
+        <aside class="pos-cart">
+          <div class="panel-head">
+            <div>
+              <h2>현재 주문</h2>
+              <p id="posCartSummary">상품을 선택하세요.</p>
+            </div>
+            <button class="btn small" id="clearPosCartBtn" type="button">비우기</button>
+          </div>
+          <div class="pos-cart-list" id="posCartList"></div>
+          <div class="pos-total">
+            <span>Total</span>
+            <strong id="posCartTotal">$0.00</strong>
+          </div>
+          <div class="pos-payments">
+            <button class="btn success" id="payCashBtn" type="button">Cash</button>
+            <button class="btn primary" id="payCardBtn" type="button">Card</button>
+            <button class="btn" id="payEftposBtn" type="button">EFTPOS</button>
+          </div>
+        </aside>
+      </div>
+
+      <div class="pos-insight-grid">
+        <section class="panel">
+          <div class="panel-head">
+            <div>
+              <h2>상품 가격 수정</h2>
+              <p>메뉴 가격은 영업 중에도 바로 변경할 수 있습니다.</p>
+            </div>
+          </div>
+          <div class="pos-edit-form">
+            <select id="posEditProduct"></select>
+            <input id="posEditName" type="text" placeholder="상품명" />
+            <input id="posEditCategory" type="text" placeholder="카테고리" />
+            <input id="posEditPrice" type="number" min="0" step="0.1" inputmode="decimal" placeholder="가격" />
+            <button class="btn success" id="savePosProductBtn" type="button">가격 저장</button>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <div>
+              <h2>재료 사용 예측</h2>
+              <p>판매량을 기준으로 재고와 발주 판단을 연결합니다.</p>
+            </div>
+          </div>
+          <div class="ingredient-list" id="posIngredientList"></div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <div>
+              <h2>최근 판매</h2>
+              <p>결제 흐름과 인기 상품을 빠르게 확인합니다.</p>
+            </div>
+          </div>
+          <div class="history-list" id="posRecentSales"></div>
+        </section>
+      </div>
+    </div>
+  </section>
 
   <section class="modal-backdrop" id="orderModal" aria-hidden="true">
     <div class="order-modal" role="dialog" aria-modal="true" aria-labelledby="orderModalTitle">

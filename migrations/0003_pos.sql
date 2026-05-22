@@ -1,0 +1,40 @@
+CREATE TABLE IF NOT EXISTS pos_products (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  category TEXT NOT NULL,
+  name TEXT NOT NULL UNIQUE,
+  price REAL NOT NULL DEFAULT 0,
+  active INTEGER NOT NULL DEFAULT 1,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS pos_sales (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  sold_at TEXT NOT NULL,
+  subtotal REAL NOT NULL DEFAULT 0,
+  total REAL NOT NULL DEFAULT 0,
+  payment_method TEXT NOT NULL DEFAULT 'cash',
+  note TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS pos_sale_items (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  sale_id INTEGER NOT NULL,
+  product_id INTEGER,
+  name TEXT NOT NULL,
+  category TEXT NOT NULL,
+  qty INTEGER NOT NULL DEFAULT 1,
+  unit_price REAL NOT NULL DEFAULT 0,
+  line_total REAL NOT NULL DEFAULT 0,
+  FOREIGN KEY (sale_id) REFERENCES pos_sales(id)
+);
+
+CREATE TABLE IF NOT EXISTS pos_product_recipes (
+  product_id INTEGER NOT NULL,
+  inventory_item_id INTEGER NOT NULL,
+  units REAL NOT NULL DEFAULT 1,
+  unit_name TEXT,
+  PRIMARY KEY (product_id, inventory_item_id)
+);
