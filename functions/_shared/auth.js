@@ -14,6 +14,17 @@ export function json(payload, status = 200) {
 
 export async function ensureAuthSchema(db) {
   await db.prepare(`
+    CREATE TABLE IF NOT EXISTS stores (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL UNIQUE,
+      active INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )
+  `).run();
+  await db.prepare("INSERT OR IGNORE INTO stores (id, name) VALUES (1, 'Main Store')").run();
+
+  await db.prepare(`
     CREATE TABLE IF NOT EXISTS users (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       username TEXT NOT NULL UNIQUE,
@@ -21,11 +32,18 @@ export async function ensureAuthSchema(db) {
       password_hash TEXT NOT NULL,
       password_salt TEXT NOT NULL,
       role TEXT NOT NULL DEFAULT 'staff',
+      store_id INTEGER NOT NULL DEFAULT 1,
       active INTEGER NOT NULL DEFAULT 1,
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     )
   `).run();
+
+  try {
+    await db.prepare("ALTER TABLE users ADD COLUMN store_id INTEGER NOT NULL DEFAULT 1").run();
+  } catch (error) {
+    if (!String(error.message || "").includes("duplicate column name")) throw error;
+  }
 
   await db.prepare(`
     CREATE TABLE IF NOT EXISTS sessions (
@@ -74,6 +92,7 @@ export function publicUser(row) {
     username: row.username,
     displayName: row.display_name,
     role: row.role,
+    storeId: Number(row.store_id || 1),
     active: Number(row.active) === 1
   };
 }
@@ -98,7 +117,7 @@ export async function getSessionUser(db, request) {
   if (!token) return null;
 
   const row = await db.prepare(`
-    SELECT u.id, u.username, u.display_name, u.role, u.active, s.expires_at
+    SELECT u.id, u.username, u.display_name, u.role, u.store_id, u.active, s.expires_at
     FROM sessions s
     JOIN users u ON u.id = s.user_id
     WHERE s.token = ?
@@ -115,15 +134,33 @@ export async function getSessionUser(db, request) {
 export async function requireUser(db, request, roles = []) {
   await ensureAuthSchema(db);
   if ((await userCount(db)) === 0) {
-    return { id: 0, username: "setup", displayName: "Setup", role: "admin", active: true };
+    return { id: 0, username: "setup", displayName: "Setup", role: "owner", storeId: 1, active: true };
   }
 
   const user = await getSessionUser(db, request);
   if (!user) throw new AuthError("로그인이 필요합니다.", 401);
-  if (roles.length && !roles.includes(user.role)) {
+  if (roles.length && !roles.includes(user.role) && user.role !== "owner") {
     throw new AuthError("관리자 권한이 필요합니다.", 403);
   }
   return user;
+}
+
+export async function listStores(db) {
+  await ensureAuthSchema(db);
+  const rows = await db.prepare("SELECT id, name, active FROM stores ORDER BY name").all();
+  return (rows.results || []).map((row) => ({
+    id: Number(row.id),
+    name: row.name,
+    active: Number(row.active) === 1
+  }));
+}
+
+export function getActiveStoreId(request, user) {
+  if (user?.role === "owner") {
+    const selected = Number(request.headers.get("x-store-id") || 0);
+    if (selected > 0) return selected;
+  }
+  return Number(user?.storeId || 1);
 }
 
 export async function deleteSession(db, request) {

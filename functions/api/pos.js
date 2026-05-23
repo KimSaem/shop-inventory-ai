@@ -1,4 +1,4 @@
-import { AuthError, json, requireUser } from "../_shared/auth.js";
+import { AuthError, getActiveStoreId, json, requireUser } from "../_shared/auth.js";
 
 const ROLL_PRODUCTS = [
   "Salmon Avocado CreamCheese",
@@ -50,6 +50,12 @@ async function ensureSchema(db) {
       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     )
   `).run();
+
+  try {
+    await db.prepare("ALTER TABLE pos_sales ADD COLUMN store_id INTEGER NOT NULL DEFAULT 1").run();
+  } catch (error) {
+    if (!String(error.message || "").includes("duplicate column name")) throw error;
+  }
 
   await db.prepare(`
     CREATE TABLE IF NOT EXISTS pos_sales (
@@ -114,38 +120,38 @@ async function getProducts(db) {
   return result.results || [];
 }
 
-async function getTodayReport(db) {
+async function getTodayReport(db, storeId = 1) {
   const today = new Date().toISOString().slice(0, 10);
   const summary = await db.prepare(`
     SELECT COUNT(*) AS transactions, COALESCE(SUM(total), 0) AS revenue
     FROM pos_sales
-    WHERE substr(sold_at, 1, 10) = ?
-  `).bind(today).first();
+    WHERE substr(sold_at, 1, 10) = ? AND store_id = ?
+  `).bind(today, storeId).first();
 
   const items = await db.prepare(`
     SELECT name, category, SUM(qty) AS qty, SUM(line_total) AS total
     FROM pos_sale_items
-    WHERE sale_id IN (SELECT id FROM pos_sales WHERE substr(sold_at, 1, 10) = ?)
+    WHERE sale_id IN (SELECT id FROM pos_sales WHERE substr(sold_at, 1, 10) = ? AND store_id = ?)
     GROUP BY name, category
     ORDER BY qty DESC, total DESC
     LIMIT 8
-  `).bind(today).all();
+  `).bind(today, storeId).all();
 
   const payments = await db.prepare(`
     SELECT payment_method, COUNT(*) AS transactions, COALESCE(SUM(total), 0) AS total
     FROM pos_sales
-    WHERE substr(sold_at, 1, 10) = ?
+    WHERE substr(sold_at, 1, 10) = ? AND store_id = ?
     GROUP BY payment_method
     ORDER BY total DESC
-  `).bind(today).all();
+  `).bind(today, storeId).all();
 
   const hourly = await db.prepare(`
     SELECT substr(sold_at, 12, 2) AS hour, COUNT(*) AS transactions, COALESCE(SUM(total), 0) AS total
     FROM pos_sales
-    WHERE substr(sold_at, 1, 10) = ?
+    WHERE substr(sold_at, 1, 10) = ? AND store_id = ?
     GROUP BY hour
     ORDER BY hour
-  `).bind(today).all();
+  `).bind(today, storeId).all();
 
   return {
     date: today,
@@ -170,13 +176,14 @@ async function getTodayReport(db) {
   };
 }
 
-async function getRecentSales(db) {
+async function getRecentSales(db, storeId = 1) {
   const sales = await db.prepare(`
     SELECT id, sold_at, subtotal, discount, total, payment_method
     FROM pos_sales
+    WHERE store_id = ?
     ORDER BY sold_at DESC, id DESC
     LIMIT 10
-  `).all();
+  `).bind(storeId).all();
 
   const rows = sales.results || [];
   if (!rows.length) return [];
@@ -205,14 +212,15 @@ async function getRecentSales(db) {
   }));
 }
 
-async function getForecast(db) {
+async function getForecast(db, storeId = 1) {
   const rows = await db.prepare(`
     SELECT substr(sold_at, 1, 10) AS day, SUM(total) AS revenue, COUNT(*) AS transactions
     FROM pos_sales
+    WHERE store_id = ?
     GROUP BY day
     ORDER BY day DESC
     LIMIT 14
-  `).all();
+  `).bind(storeId).all();
 
   const days = rows.results || [];
   const revenue = days.map((day) => Number(day.revenue || 0));
@@ -227,18 +235,18 @@ async function getForecast(db) {
   };
 }
 
-async function getIngredientUsage(db) {
+async function getIngredientUsage(db, storeId = 1) {
   const rows = await db.prepare(`
     SELECT category, name, SUM(qty) AS qty
     FROM pos_sale_items
     WHERE sale_id IN (
       SELECT id FROM pos_sales
-      WHERE sold_at >= datetime('now', '-7 days')
+      WHERE sold_at >= datetime('now', '-7 days') AND store_id = ?
     )
     GROUP BY category, name
     ORDER BY qty DESC
     LIMIT 12
-  `).all();
+  `).bind(storeId).all();
 
   return (rows.results || []).map((row) => ({
     label: row.name,
@@ -258,17 +266,18 @@ function buildIngredientHint(name, category, qty) {
   return `${category} ${qty}개 판매`;
 }
 
-async function getDashboard(db) {
+async function getDashboard(db, storeId = 1) {
   return {
     products: await getProducts(db),
-    today: await getTodayReport(db),
-    forecast: await getForecast(db),
-    ingredientUsage: await getIngredientUsage(db),
-    recentSales: await getRecentSales(db)
+    today: await getTodayReport(db, storeId),
+    forecast: await getForecast(db, storeId),
+    ingredientUsage: await getIngredientUsage(db, storeId),
+    recentSales: await getRecentSales(db, storeId),
+    storeId
   };
 }
 
-async function recordSale(db, body) {
+async function recordSale(db, body, storeId = 1) {
   const items = Array.isArray(body.items) ? body.items : [];
   if (!items.length) throw new Error("Cart is empty.");
 
@@ -296,9 +305,9 @@ async function recordSale(db, body) {
   const soldAt = new Date().toISOString();
 
   const sale = await db.prepare(`
-    INSERT INTO pos_sales (sold_at, subtotal, discount, total, payment_method, note)
-    VALUES (?, ?, ?, ?, ?, ?)
-  `).bind(soldAt, total, discount, finalTotal, paymentMethod, body.note || null).run();
+    INSERT INTO pos_sales (store_id, sold_at, subtotal, discount, total, payment_method, note)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `).bind(storeId, soldAt, total, discount, finalTotal, paymentMethod, body.note || null).run();
 
   const saleId = sale.meta.last_row_id;
   for (const line of lines) {
@@ -333,25 +342,26 @@ export async function onRequest({ request, env }) {
   try {
     await ensureSchema(env.DB);
     await ensureSeeded(env.DB);
-    await requireUser(env.DB, request);
+    const user = await requireUser(env.DB, request);
+    const storeId = getActiveStoreId(request, user);
 
     const url = new URL(request.url);
     const method = request.method.toUpperCase();
     const action = url.searchParams.get("action");
 
-    if (method === "GET") return json(await getDashboard(env.DB));
+    if (method === "GET") return json(await getDashboard(env.DB, storeId));
 
     const body = await request.json().catch(() => ({}));
 
     if (method === "POST" && action === "sale") {
-      const sale = await recordSale(env.DB, body);
-      return json({ ok: true, sale, dashboard: await getDashboard(env.DB) });
+      const sale = await recordSale(env.DB, body, storeId);
+      return json({ ok: true, sale, dashboard: await getDashboard(env.DB, storeId) });
     }
 
     if (method === "POST" && action === "update-product") {
       await requireUser(env.DB, request, ["admin"]);
       await updateProduct(env.DB, body);
-      return json({ ok: true, dashboard: await getDashboard(env.DB) });
+      return json({ ok: true, dashboard: await getDashboard(env.DB, storeId) });
     }
 
     return json({ error: "Not found" }, 404);

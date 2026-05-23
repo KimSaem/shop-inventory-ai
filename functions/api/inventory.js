@@ -1,4 +1,4 @@
-import { AuthError, requireUser } from "../_shared/auth.js";
+import { AuthError, getActiveStoreId, requireUser } from "../_shared/auth.js";
 
 const DEFAULT_DATA = [
   ["튀김 / 냉동", ["만두", 1], ["탬프라", 2], ["스프링롤", 0], ["타코야끼", 0], ["새우", 6], ["포크 돈까스", 1], ["프론 트위스트", 0], ["프론 슈마이", 1], ["피쉬", 0], ["핫도그", 0], ["손가락치킨", 1], ["크랩볼", 0], ["오징어", 1], ["스시 튀김", 0], ["라이스볼", 0]],
@@ -27,7 +27,31 @@ async function ensureSchema(db) {
     "ALTER TABLE items ADD COLUMN product_code TEXT",
     "ALTER TABLE items ADD COLUMN unit TEXT",
     "ALTER TABLE items ADD COLUMN min_qty INTEGER NOT NULL DEFAULT 0",
-    "ALTER TABLE items ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0"
+    "ALTER TABLE items ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0",
+    `CREATE TABLE IF NOT EXISTS store_item_qty (
+      store_id INTEGER NOT NULL,
+      item_id INTEGER NOT NULL,
+      current_qty INTEGER NOT NULL DEFAULT 0,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (store_id, item_id)
+    )`,
+    `CREATE TABLE IF NOT EXISTS store_inventory_records (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      store_id INTEGER NOT NULL,
+      record_date TEXT NOT NULL,
+      weekday INTEGER NOT NULL,
+      note TEXT,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(store_id, record_date)
+    )`,
+    `CREATE TABLE IF NOT EXISTS store_inventory_record_items (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      record_id INTEGER NOT NULL,
+      item_id INTEGER NOT NULL,
+      qty INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(record_id, item_id)
+    )`
   ];
 
   for (const statement of statements) {
@@ -61,7 +85,7 @@ async function ensureSeeded(db) {
   }
 }
 
-async function getCategories(db) {
+async function getCategories(db, storeId = 1) {
   const rows = await db.prepare(`
     SELECT
       c.id AS category_id,
@@ -69,7 +93,7 @@ async function getCategories(db) {
       c.sort_order AS category_sort,
       i.id AS item_id,
       i.name AS item_name,
-      i.current_qty,
+      COALESCE(sq.current_qty, i.current_qty) AS current_qty,
       i.supplier,
       i.product_code,
       i.unit,
@@ -78,8 +102,9 @@ async function getCategories(db) {
       i.sort_order AS item_sort
     FROM categories c
     LEFT JOIN items i ON i.category_id = c.id AND i.active = 1
+    LEFT JOIN store_item_qty sq ON sq.item_id = i.id AND sq.store_id = ?
     ORDER BY c.sort_order, i.sort_order, i.name
-  `).all();
+  `).bind(storeId).all();
 
   const categories = [];
   const byId = new Map();
@@ -112,7 +137,7 @@ async function getCategories(db) {
   return categories;
 }
 
-async function getRecords(db) {
+async function getRecords(db, storeId = 1) {
   const rows = await db.prepare(`
     SELECT
       r.id AS record_id,
@@ -120,10 +145,11 @@ async function getRecords(db) {
       r.weekday,
       ri.item_id,
       ri.qty
-    FROM inventory_records r
-    LEFT JOIN inventory_record_items ri ON ri.record_id = r.id
+    FROM store_inventory_records r
+    LEFT JOIN store_inventory_record_items ri ON ri.record_id = r.id
+    WHERE r.store_id = ?
     ORDER BY r.record_date ASC
-  `).all();
+  `).bind(storeId).all();
 
   const records = [];
   const byId = new Map();
@@ -202,47 +228,47 @@ function buildPredictions(categories, records) {
   }));
 }
 
-async function saveRecord(db, body) {
+async function saveRecord(db, body, storeId = 1) {
   const date = body.date || todayKey();
   const weekday = Number.isInteger(body.weekday) ? body.weekday : new Date(`${date}T12:00:00Z`).getUTCDay();
   const items = Array.isArray(body.items) ? body.items : [];
 
   await db.prepare(`
-    INSERT INTO inventory_records (record_date, weekday, note)
-    VALUES (?, ?, ?)
-    ON CONFLICT(record_date) DO UPDATE SET weekday = excluded.weekday, note = excluded.note
-  `).bind(date, weekday, body.note || null).run();
+    INSERT INTO store_inventory_records (store_id, record_date, weekday, note)
+    VALUES (?, ?, ?, ?)
+    ON CONFLICT(store_id, record_date) DO UPDATE SET weekday = excluded.weekday, note = excluded.note
+  `).bind(storeId, date, weekday, body.note || null).run();
 
-  const record = await db.prepare("SELECT id FROM inventory_records WHERE record_date = ?").bind(date).first();
-  await db.prepare("DELETE FROM inventory_record_items WHERE record_id = ?").bind(record.id).run();
+  const record = await db.prepare("SELECT id FROM store_inventory_records WHERE store_id = ? AND record_date = ?").bind(storeId, date).first();
+  await db.prepare("DELETE FROM store_inventory_record_items WHERE record_id = ?").bind(record.id).run();
 
   for (const item of items) {
     await db.prepare(`
-      INSERT INTO inventory_record_items (record_id, item_id, qty)
+      INSERT INTO store_inventory_record_items (record_id, item_id, qty)
       VALUES (?, ?, ?)
     `).bind(record.id, item.id, Math.max(0, Number(item.qty) || 0)).run();
   }
 }
 
-async function updateQuantity(db, body) {
+async function updateQuantity(db, body, storeId = 1) {
   const id = Number(body.id);
   const qty = Math.max(0, Number(body.qty) || 0);
   if (!id) throw new Error("Missing item id");
 
   await db.prepare(`
-    UPDATE items
-    SET current_qty = ?, updated_at = CURRENT_TIMESTAMP
-    WHERE id = ?
-  `).bind(qty, id).run();
+    INSERT INTO store_item_qty (store_id, item_id, current_qty, updated_at)
+    VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+    ON CONFLICT(store_id, item_id) DO UPDATE SET current_qty = excluded.current_qty, updated_at = CURRENT_TIMESTAMP
+  `).bind(storeId, id, qty).run();
 }
 
-async function applyPredictions(db, predictions) {
+async function applyPredictions(db, predictions, storeId = 1) {
   for (const prediction of predictions) {
     await db.prepare(`
-      UPDATE items
-      SET current_qty = ?, updated_at = CURRENT_TIMESTAMP
-      WHERE id = ?
-    `).bind(prediction.qty, prediction.itemId).run();
+      INSERT INTO store_item_qty (store_id, item_id, current_qty, updated_at)
+      VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+      ON CONFLICT(store_id, item_id) DO UPDATE SET current_qty = excluded.current_qty, updated_at = CURRENT_TIMESTAMP
+    `).bind(storeId, prediction.itemId, prediction.qty).run();
   }
 }
 
@@ -311,27 +337,29 @@ export async function onRequest({ request, env }) {
   try {
     await ensureSchema(env.DB);
     await ensureSeeded(env.DB);
-    await requireUser(env.DB, request);
+    const user = await requireUser(env.DB, request);
+    const storeId = getActiveStoreId(request, user);
 
     const url = new URL(request.url);
     const method = request.method.toUpperCase();
 
     if (method === "GET") {
-      const categories = await getCategories(env.DB);
-      const records = await getRecords(env.DB);
+      const categories = await getCategories(env.DB, storeId);
+      const records = await getRecords(env.DB, storeId);
       const predictions = buildPredictions(categories, records);
       return json({
         categories,
         predictions,
         recordsCount: records.length,
-        lastRecordDate: records.length ? records[records.length - 1].date : null
+        lastRecordDate: records.length ? records[records.length - 1].date : null,
+        storeId
       });
     }
 
     const body = await request.json().catch(() => ({}));
 
     if (method === "POST" && url.searchParams.get("action") === "record") {
-      await saveRecord(env.DB, body);
+      await saveRecord(env.DB, body, storeId);
       return json({ ok: true });
     }
 
@@ -354,15 +382,15 @@ export async function onRequest({ request, env }) {
     }
 
     if (method === "POST" && url.searchParams.get("action") === "apply-predictions") {
-      const categories = await getCategories(env.DB);
-      const records = await getRecords(env.DB);
+      const categories = await getCategories(env.DB, storeId);
+      const records = await getRecords(env.DB, storeId);
       const predictions = buildPredictions(categories, records);
-      await applyPredictions(env.DB, predictions);
+      await applyPredictions(env.DB, predictions, storeId);
       return json({ ok: true });
     }
 
     if (method === "PATCH") {
-      await updateQuantity(env.DB, body);
+      await updateQuantity(env.DB, body, storeId);
       return json({ ok: true });
     }
 

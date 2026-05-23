@@ -6,6 +6,7 @@ import {
   getSessionUser,
   hashPassword,
   json,
+  listStores,
   publicUser,
   requireUser,
   userCount,
@@ -23,6 +24,7 @@ function cleanDisplayName(value, fallback) {
 async function createUser(db, body, role) {
   const username = cleanUsername(body.username);
   const displayName = cleanDisplayName(body.displayName, username);
+  const storeId = Number(body.storeId || 1);
   const password = String(body.password || "");
   if (username.length < 3 || password.length < 6) {
     throw new AuthError("아이디는 3자 이상, 비밀번호는 6자 이상이어야 합니다.", 400);
@@ -30,22 +32,23 @@ async function createUser(db, body, role) {
 
   const passwordResult = await hashPassword(password);
   const result = await db.prepare(`
-    INSERT INTO users (username, display_name, password_hash, password_salt, role)
-    VALUES (?, ?, ?, ?, ?)
-  `).bind(username, displayName, passwordResult.hash, passwordResult.salt, role).run();
+    INSERT INTO users (username, display_name, password_hash, password_salt, role, store_id)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `).bind(username, displayName, passwordResult.hash, passwordResult.salt, role, storeId).run();
 
   return {
     id: result.meta.last_row_id,
     username,
     displayName,
     role,
+    storeId,
     active: true
   };
 }
 
 async function listUsers(db) {
   const rows = await db.prepare(`
-    SELECT id, username, display_name, role, active
+    SELECT id, username, display_name, role, store_id, active
     FROM users
     ORDER BY role, username
   `).all();
@@ -63,20 +66,25 @@ export async function onRequest({ request, env }) {
 
     if (method === "GET" && action === "users") {
       await requireUser(env.DB, request, ["admin"]);
-      return json({ users: await listUsers(env.DB) });
+      return json({ users: await listUsers(env.DB), stores: await listStores(env.DB) });
+    }
+
+    if (method === "GET" && action === "stores") {
+      await requireUser(env.DB, request, ["admin"]);
+      return json({ stores: await listStores(env.DB) });
     }
 
     if (method === "GET") {
       const setupRequired = (await userCount(env.DB)) === 0;
       const user = setupRequired ? null : await getSessionUser(env.DB, request);
-      return json({ setupRequired, user });
+      return json({ setupRequired, user, stores: user ? await listStores(env.DB) : [] });
     }
 
     const body = await request.json().catch(() => ({}));
 
     if (method === "POST" && action === "setup") {
       if ((await userCount(env.DB)) > 0) throw new AuthError("이미 관리자가 생성되어 있습니다.", 409);
-      const user = await createUser(env.DB, body, "admin");
+      const user = await createUser(env.DB, { ...body, storeId: 1 }, "owner");
       const session = await createSession(env.DB, user.id);
       return json({ ok: true, user, ...session });
     }
@@ -99,10 +107,18 @@ export async function onRequest({ request, env }) {
     }
 
     if (method === "POST" && action === "create-user") {
-      await requireUser(env.DB, request, ["admin"]);
-      const role = body.role === "admin" ? "admin" : "staff";
+      const currentUser = await requireUser(env.DB, request, ["admin"]);
+      const role = body.role === "owner" && currentUser.role === "owner" ? "owner" : body.role === "admin" ? "admin" : "staff";
       const user = await createUser(env.DB, body, role);
-      return json({ ok: true, user, users: await listUsers(env.DB) });
+      return json({ ok: true, user, users: await listUsers(env.DB), stores: await listStores(env.DB) });
+    }
+
+    if (method === "POST" && action === "create-store") {
+      await requireUser(env.DB, request, ["owner"]);
+      const name = String(body.name || "").trim().slice(0, 80);
+      if (name.length < 2) throw new AuthError("Store name is required.", 400);
+      await env.DB.prepare("INSERT OR IGNORE INTO stores (name) VALUES (?)").bind(name).run();
+      return json({ ok: true, stores: await listStores(env.DB) });
     }
 
     if (method === "POST" && action === "set-active") {
@@ -112,7 +128,7 @@ export async function onRequest({ request, env }) {
       await env.DB.prepare("UPDATE users SET active = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
         .bind(active, id)
         .run();
-      return json({ ok: true, users: await listUsers(env.DB) });
+      return json({ ok: true, users: await listUsers(env.DB), stores: await listStores(env.DB) });
     }
 
     return json({ error: "Not found" }, 404);

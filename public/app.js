@@ -5,6 +5,7 @@ const LOCAL_KEY = "shop-inventory-ai-local-v2";
 const POS_LOCAL_KEY = "shop-inventory-ai-pos-local-v1";
 const POS_HOLD_KEY = "shop-inventory-ai-pos-holds-v1";
 const AUTH_TOKEN_KEY = "shop-inventory-ai-auth-token-v1";
+const STORE_KEY = "shop-inventory-ai-selected-store-v1";
 const ACTIVITY_KEY = "shop-inventory-ai-activity-v1";
 const THEME_KEY = "shop-inventory-ai-theme-v1";
 const ORDER_HISTORY_KEY = "shop-inventory-ai-order-history-v1";
@@ -51,6 +52,8 @@ const state = {
     setupRequired: false,
     mode: "login",
     users: [],
+    stores: [],
+    selectedStoreId: Number(localStorage.getItem(STORE_KEY) || 1),
     offline: false
   },
   selectedCategory: "all",
@@ -77,6 +80,7 @@ const elements = {
   statusText: $("statusText"),
   connectionBadge: $("connectionBadge"),
   userBadge: $("userBadge"),
+  storeSelect: $("storeSelect"),
   authModal: $("authModal"),
   authTitle: $("authTitle"),
   authSubtitle: $("authSubtitle"),
@@ -89,6 +93,8 @@ const elements = {
   adminNewUsername: $("adminNewUsername"),
   adminNewDisplayName: $("adminNewDisplayName"),
   adminNewPassword: $("adminNewPassword"),
+  adminNewStore: $("adminNewStore"),
+  adminNewStoreName: $("adminNewStoreName"),
   adminNewRole: $("adminNewRole"),
   adminUserList: $("adminUserList"),
   recordsCount: $("recordsCount"),
@@ -220,7 +226,11 @@ function writeOrderHistory() {
 }
 
 function isAdmin() {
-  return state.auth.user?.role === "admin";
+  return state.auth.user?.role === "admin" || state.auth.user?.role === "owner";
+}
+
+function isOwner() {
+  return state.auth.user?.role === "owner";
 }
 
 function openAuth(mode = state.auth.setupRequired ? "setup" : "login") {
@@ -246,6 +256,7 @@ function closeAuth() {
 function applyAuthUi() {
   const user = state.auth.user;
   document.body.classList.toggle("role-admin", isAdmin());
+  document.body.classList.toggle("role-owner", isOwner());
   document.body.classList.toggle("role-staff", Boolean(user) && !isAdmin());
   document.body.classList.toggle("auth-locked", !user);
   elements.userBadge.textContent = user
@@ -253,11 +264,33 @@ function applyAuthUi() {
     : "로그인 필요";
   $("openAdminBtn").disabled = !isAdmin();
   $("logoutBtn").style.display = user ? "inline-flex" : "none";
+  renderStoreSelect();
+}
+
+function renderStoreSelect() {
+  const user = state.auth.user;
+  elements.storeSelect.innerHTML = "";
+  const stores = state.auth.stores.length ? state.auth.stores : [{ id: state.auth.user?.storeId || 1, name: "Main Store", active: true }];
+  for (const store of stores.filter((entry) => entry.active)) {
+    const option = document.createElement("option");
+    option.value = store.id;
+    option.textContent = store.name;
+    elements.storeSelect.append(option);
+  }
+  const allowedStore = isOwner()
+    ? state.auth.selectedStoreId
+    : Number(state.auth.user?.storeId || state.auth.selectedStoreId || 1);
+  state.auth.selectedStoreId = allowedStore;
+  elements.storeSelect.value = String(allowedStore);
+  elements.storeSelect.style.display = user ? "inline-flex" : "none";
+  elements.storeSelect.disabled = !isOwner();
 }
 
 function setAuthSession(data) {
   state.auth.token = data.token || state.auth.token;
   state.auth.user = data.user || null;
+  state.auth.stores = data.stores || state.auth.stores || [];
+  if (!isOwner() && state.auth.user?.storeId) state.auth.selectedStoreId = Number(state.auth.user.storeId);
   state.auth.setupRequired = false;
   if (state.auth.token) localStorage.setItem(AUTH_TOKEN_KEY, state.auth.token);
   applyAuthUi();
@@ -268,6 +301,8 @@ async function loadAuth() {
     const data = await authApi();
     state.auth.setupRequired = Boolean(data.setupRequired);
     state.auth.user = data.user || null;
+    state.auth.stores = data.stores || [];
+    if (state.auth.user?.storeId && !isOwner()) state.auth.selectedStoreId = Number(state.auth.user.storeId);
     state.auth.offline = false;
     applyAuthUi();
     if (state.auth.setupRequired) {
@@ -282,7 +317,8 @@ async function loadAuth() {
     return true;
   } catch (error) {
     state.auth.offline = true;
-    state.auth.user = { id: 0, username: "local", displayName: "Local Admin", role: "admin", active: true };
+    state.auth.user = { id: 0, username: "local", displayName: "Local Admin", role: "owner", storeId: 1, active: true };
+    state.auth.stores = [{ id: 1, name: "Local Store", active: true }];
     applyAuthUi();
     closeAuth();
     showToast("인증 서버 연결 실패, 로컬 관리자 모드로 실행합니다.");
@@ -317,6 +353,7 @@ async function logout() {
   }
   state.auth.token = "";
   state.auth.user = null;
+  state.auth.stores = [];
   localStorage.removeItem(AUTH_TOKEN_KEY);
   applyAuthUi();
   openAuth("login");
@@ -330,6 +367,9 @@ async function loadAdminUsers() {
   }
   const data = await authApi("?action=users");
   state.auth.users = data.users || [];
+  state.auth.stores = data.stores || state.auth.stores || [];
+  renderStoreSelect();
+  renderAdminStoreOptions();
   renderAdminUsers();
 }
 
@@ -350,18 +390,32 @@ function closeAdminModal() {
 
 function renderAdminUsers() {
   elements.adminUserList.innerHTML = "";
+  renderAdminStoreOptions();
   for (const user of state.auth.users) {
+    const store = state.auth.stores.find((entry) => Number(entry.id) === Number(user.storeId));
     const row = document.createElement("div");
     row.className = "user-row";
     row.innerHTML = `
       <div>
         <strong>${user.displayName || user.username}</strong>
-        <span>${user.username} · ${user.role === "admin" ? "관리자" : "직원"} · ${user.active ? "활성" : "비활성"}</span>
+        <span>${user.username} · ${user.role === "owner" ? "전체 오너" : user.role === "admin" ? "관리자" : "직원"} · ${store?.name || "Main Store"} · ${user.active ? "활성" : "비활성"}</span>
       </div>
       <button class="btn small ${user.active ? "danger" : "success"}" type="button" data-user-active="${user.id}" data-active="${user.active ? "0" : "1"}">${user.active ? "비활성" : "활성"}</button>
     `;
     elements.adminUserList.append(row);
   }
+}
+
+function renderAdminStoreOptions() {
+  elements.adminNewStore.innerHTML = "";
+  const stores = state.auth.stores.length ? state.auth.stores : [{ id: 1, name: "Main Store", active: true }];
+  for (const store of stores.filter((entry) => entry.active)) {
+    const option = document.createElement("option");
+    option.value = store.id;
+    option.textContent = store.name;
+    elements.adminNewStore.append(option);
+  }
+  elements.adminNewStore.value = String(state.auth.selectedStoreId || 1);
 }
 
 async function createAdminUser() {
@@ -371,15 +425,29 @@ async function createAdminUser() {
       username: elements.adminNewUsername.value,
       displayName: elements.adminNewDisplayName.value,
       password: elements.adminNewPassword.value,
+      storeId: Number(elements.adminNewStore.value || state.auth.selectedStoreId || 1),
       role: elements.adminNewRole.value
     })
   });
   state.auth.users = data.users || [];
+  state.auth.stores = data.stores || state.auth.stores || [];
   elements.adminNewUsername.value = "";
   elements.adminNewDisplayName.value = "";
   elements.adminNewPassword.value = "";
   renderAdminUsers();
   showToast("새 계정을 생성했습니다.");
+}
+
+async function createStore() {
+  const data = await authApi("?action=create-store", {
+    method: "POST",
+    body: JSON.stringify({ name: elements.adminNewStoreName.value })
+  });
+  state.auth.stores = data.stores || [];
+  elements.adminNewStoreName.value = "";
+  renderStoreSelect();
+  renderAdminStoreOptions();
+  showToast("새 매장을 생성했습니다.");
 }
 
 async function setUserActive(id, active) {
@@ -439,6 +507,7 @@ function showToast(message) {
 function authHeaders() {
   return {
     "content-type": "application/json",
+    "x-store-id": String(state.auth.selectedStoreId || 1),
     ...(state.auth.token ? { authorization: `Bearer ${state.auth.token}` } : {})
   };
 }
@@ -2135,6 +2204,15 @@ function bindEvents() {
   $("openAdminBtn").addEventListener("click", openAdminModal);
   $("closeAdminBtn").addEventListener("click", closeAdminModal);
   $("createUserBtn").addEventListener("click", () => createAdminUser().catch((error) => showToast(error.message)));
+  $("createStoreBtn").addEventListener("click", () => createStore().catch((error) => showToast(error.message)));
+  elements.storeSelect.addEventListener("change", async (event) => {
+    state.auth.selectedStoreId = Number(event.target.value || 1);
+    localStorage.setItem(STORE_KEY, String(state.auth.selectedStoreId));
+    state.posCart = [];
+    await loadData();
+    await loadPosData();
+    showToast("매장을 전환했습니다.");
+  });
   $("refreshBtn").addEventListener("click", loadData);
   $("copyBtn").addEventListener("click", copyMessage);
   $("shareBtn").addEventListener("click", shareMessage);

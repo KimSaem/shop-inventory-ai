@@ -151,6 +151,23 @@ h2 {
   display: none !important;
 }
 
+.owner-only {
+  display: none;
+}
+
+.role-owner .owner-only {
+  display: block;
+}
+
+.store-select {
+  width: auto;
+  min-width: 150px;
+  max-width: 220px;
+  min-height: 36px;
+  font-size: 13px;
+  font-weight: 850;
+}
+
 .status-badge,
 .small-pill,
 .prediction-pill,
@@ -832,7 +849,7 @@ textarea {
 
 .admin-grid {
   display: grid;
-  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 12px;
   padding: 14px 16px 16px;
 }
