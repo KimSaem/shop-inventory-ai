@@ -129,6 +129,26 @@ h2 {
   flex: 0 0 auto;
   align-items: center;
   gap: 8px;
+  flex-wrap: wrap;
+}
+
+.user-badge {
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.auth-locked main,
+.auth-locked .bottom-bar {
+  filter: blur(2px);
+  pointer-events: none;
+  user-select: none;
+}
+
+.role-staff .admin-only,
+.role-staff .manage {
+  display: none !important;
 }
 
 .status-badge,
@@ -771,6 +791,8 @@ textarea {
 }
 
 .order-modal,
+.auth-modal,
+.admin-modal,
 .pos-modal,
 .item-modal {
   width: min(1120px, 100%);
@@ -782,6 +804,16 @@ textarea {
   box-shadow: 0 28px 80px rgba(15, 23, 42, 0.28);
 }
 
+.auth-modal {
+  width: min(480px, 100%);
+}
+
+.admin-modal {
+  width: min(1040px, 100%);
+  max-height: min(780px, calc(100vh - 36px));
+  overflow: auto;
+}
+
 .pos-modal {
   width: min(1280px, 100%);
   overflow: auto;
@@ -789,6 +821,45 @@ textarea {
 
 .item-modal {
   width: min(680px, 100%);
+}
+
+.auth-form,
+.admin-form {
+  display: grid;
+  gap: 10px;
+  padding: 16px;
+}
+
+.admin-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+  gap: 12px;
+  padding: 14px 16px 16px;
+}
+
+.user-list {
+  display: grid;
+  gap: 8px;
+  padding: 0 12px 12px;
+}
+
+.user-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  padding: 11px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel-subtle);
+}
+
+.user-row span {
+  display: block;
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
 }
 
 .modal-head {
@@ -1146,6 +1217,7 @@ textarea {
 
   .order-toolbar,
   .order-modal-grid,
+  .admin-grid,
   .pos-layout,
   .pos-toolbar,
   .pos-insight-grid,

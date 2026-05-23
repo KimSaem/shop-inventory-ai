@@ -1,3 +1,5 @@
+import { AuthError, json, requireUser } from "../_shared/auth.js";
+
 const ROLL_PRODUCTS = [
   "Salmon Avocado CreamCheese",
   "Salmon Avocado",
@@ -34,13 +36,6 @@ const DEFAULT_PRODUCTS = [
   { category: "Fried", name: "Fried $4.5", price: 4.5, sort_order: 203 },
   { category: "Fried", name: "Fried $4.7", price: 4.7, sort_order: 204 }
 ];
-
-function json(payload, status = 200) {
-  return new Response(JSON.stringify(payload), {
-    status,
-    headers: { "content-type": "application/json; charset=utf-8" }
-  });
-}
 
 async function ensureSchema(db) {
   await db.prepare(`
@@ -338,6 +333,7 @@ export async function onRequest({ request, env }) {
   try {
     await ensureSchema(env.DB);
     await ensureSeeded(env.DB);
+    await requireUser(env.DB, request);
 
     const url = new URL(request.url);
     const method = request.method.toUpperCase();
@@ -353,12 +349,14 @@ export async function onRequest({ request, env }) {
     }
 
     if (method === "POST" && action === "update-product") {
+      await requireUser(env.DB, request, ["admin"]);
       await updateProduct(env.DB, body);
       return json({ ok: true, dashboard: await getDashboard(env.DB) });
     }
 
     return json({ error: "Not found" }, 404);
   } catch (error) {
+    if (error instanceof AuthError) return json({ error: error.message }, error.status);
     return json({ error: error.message || "POS error" }, 500);
   }
 }

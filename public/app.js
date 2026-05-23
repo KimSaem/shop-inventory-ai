@@ -1,8 +1,10 @@
 const API_URL = "/api/inventory";
 const POS_API_URL = "/api/pos";
+const AUTH_API_URL = "/api/auth";
 const LOCAL_KEY = "shop-inventory-ai-local-v2";
 const POS_LOCAL_KEY = "shop-inventory-ai-pos-local-v1";
 const POS_HOLD_KEY = "shop-inventory-ai-pos-holds-v1";
+const AUTH_TOKEN_KEY = "shop-inventory-ai-auth-token-v1";
 const ACTIVITY_KEY = "shop-inventory-ai-activity-v1";
 const THEME_KEY = "shop-inventory-ai-theme-v1";
 const ORDER_HISTORY_KEY = "shop-inventory-ai-order-history-v1";
@@ -43,6 +45,14 @@ const state = {
   online: true,
   hideZero: true,
   orderOnly: false,
+  auth: {
+    token: localStorage.getItem(AUTH_TOKEN_KEY) || "",
+    user: null,
+    setupRequired: false,
+    mode: "login",
+    users: [],
+    offline: false
+  },
   selectedCategory: "all",
   selectedOrderGroup: "all",
   selectedPosCategory: "all",
@@ -66,6 +76,21 @@ const elements = {
   inventory: $("inventory"),
   statusText: $("statusText"),
   connectionBadge: $("connectionBadge"),
+  userBadge: $("userBadge"),
+  authModal: $("authModal"),
+  authTitle: $("authTitle"),
+  authSubtitle: $("authSubtitle"),
+  authUsername: $("authUsername"),
+  authDisplayName: $("authDisplayName"),
+  authPassword: $("authPassword"),
+  authMessage: $("authMessage"),
+  submitAuthBtn: $("submitAuthBtn"),
+  adminModal: $("adminModal"),
+  adminNewUsername: $("adminNewUsername"),
+  adminNewDisplayName: $("adminNewDisplayName"),
+  adminNewPassword: $("adminNewPassword"),
+  adminNewRole: $("adminNewRole"),
+  adminUserList: $("adminUserList"),
   recordsCount: $("recordsCount"),
   predictedCount: $("predictedCount"),
   issueCount: $("issueCount"),
@@ -194,6 +219,178 @@ function writeOrderHistory() {
   localStorage.setItem(ORDER_HISTORY_KEY, JSON.stringify(state.orderHistory.slice(0, 20)));
 }
 
+function isAdmin() {
+  return state.auth.user?.role === "admin";
+}
+
+function openAuth(mode = state.auth.setupRequired ? "setup" : "login") {
+  state.auth.mode = mode;
+  elements.authModal.classList.add("open");
+  elements.authModal.setAttribute("aria-hidden", "false");
+  elements.authTitle.textContent = mode === "setup" ? "최초 관리자 생성" : "로그인";
+  elements.authSubtitle.textContent = mode === "setup"
+    ? "첫 계정은 전체 시스템을 관리하는 관리자 계정입니다."
+    : "계정으로 로그인하면 POS와 재고 시스템을 사용할 수 있습니다.";
+  elements.authDisplayName.style.display = mode === "setup" ? "block" : "none";
+  elements.submitAuthBtn.textContent = mode === "setup" ? "관리자 만들기" : "로그인";
+  elements.authMessage.textContent = mode === "setup"
+    ? "아이디 3자 이상, 비밀번호 6자 이상으로 설정하세요."
+    : "관리자에게 받은 계정으로 로그인하세요.";
+}
+
+function closeAuth() {
+  elements.authModal.classList.remove("open");
+  elements.authModal.setAttribute("aria-hidden", "true");
+}
+
+function applyAuthUi() {
+  const user = state.auth.user;
+  document.body.classList.toggle("role-admin", isAdmin());
+  document.body.classList.toggle("role-staff", Boolean(user) && !isAdmin());
+  document.body.classList.toggle("auth-locked", !user);
+  elements.userBadge.textContent = user
+    ? `${user.displayName || user.username} · ${user.role === "admin" ? "관리자" : "직원"}`
+    : "로그인 필요";
+  $("openAdminBtn").disabled = !isAdmin();
+  $("logoutBtn").style.display = user ? "inline-flex" : "none";
+}
+
+function setAuthSession(data) {
+  state.auth.token = data.token || state.auth.token;
+  state.auth.user = data.user || null;
+  state.auth.setupRequired = false;
+  if (state.auth.token) localStorage.setItem(AUTH_TOKEN_KEY, state.auth.token);
+  applyAuthUi();
+}
+
+async function loadAuth() {
+  try {
+    const data = await authApi();
+    state.auth.setupRequired = Boolean(data.setupRequired);
+    state.auth.user = data.user || null;
+    state.auth.offline = false;
+    applyAuthUi();
+    if (state.auth.setupRequired) {
+      openAuth("setup");
+      return false;
+    }
+    if (!state.auth.user) {
+      openAuth("login");
+      return false;
+    }
+    closeAuth();
+    return true;
+  } catch (error) {
+    state.auth.offline = true;
+    state.auth.user = { id: 0, username: "local", displayName: "Local Admin", role: "admin", active: true };
+    applyAuthUi();
+    closeAuth();
+    showToast("인증 서버 연결 실패, 로컬 관리자 모드로 실행합니다.");
+    return true;
+  }
+}
+
+async function submitAuth() {
+  const payload = {
+    username: elements.authUsername.value,
+    displayName: elements.authDisplayName.value,
+    password: elements.authPassword.value
+  };
+  const action = state.auth.mode === "setup" ? "setup" : "login";
+  const data = await authApi(`?action=${action}`, {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+  setAuthSession(data);
+  closeAuth();
+  elements.authPassword.value = "";
+  showToast(state.auth.mode === "setup" ? "관리자 계정이 생성되었습니다." : "로그인되었습니다.");
+  await loadData();
+  await loadPosData();
+}
+
+async function logout() {
+  try {
+    await authApi("?action=logout", { method: "POST", body: "{}" });
+  } catch (error) {
+    // Local/offline logout still clears the browser session.
+  }
+  state.auth.token = "";
+  state.auth.user = null;
+  localStorage.removeItem(AUTH_TOKEN_KEY);
+  applyAuthUi();
+  openAuth("login");
+}
+
+async function loadAdminUsers() {
+  if (!isAdmin() || state.auth.offline) {
+    state.auth.users = state.auth.offline ? [state.auth.user] : [];
+    renderAdminUsers();
+    return;
+  }
+  const data = await authApi("?action=users");
+  state.auth.users = data.users || [];
+  renderAdminUsers();
+}
+
+function openAdminModal() {
+  if (!isAdmin()) {
+    showToast("관리자 권한이 필요합니다.");
+    return;
+  }
+  elements.adminModal.classList.add("open");
+  elements.adminModal.setAttribute("aria-hidden", "false");
+  loadAdminUsers().catch((error) => showToast(error.message));
+}
+
+function closeAdminModal() {
+  elements.adminModal.classList.remove("open");
+  elements.adminModal.setAttribute("aria-hidden", "true");
+}
+
+function renderAdminUsers() {
+  elements.adminUserList.innerHTML = "";
+  for (const user of state.auth.users) {
+    const row = document.createElement("div");
+    row.className = "user-row";
+    row.innerHTML = `
+      <div>
+        <strong>${user.displayName || user.username}</strong>
+        <span>${user.username} · ${user.role === "admin" ? "관리자" : "직원"} · ${user.active ? "활성" : "비활성"}</span>
+      </div>
+      <button class="btn small ${user.active ? "danger" : "success"}" type="button" data-user-active="${user.id}" data-active="${user.active ? "0" : "1"}">${user.active ? "비활성" : "활성"}</button>
+    `;
+    elements.adminUserList.append(row);
+  }
+}
+
+async function createAdminUser() {
+  const data = await authApi("?action=create-user", {
+    method: "POST",
+    body: JSON.stringify({
+      username: elements.adminNewUsername.value,
+      displayName: elements.adminNewDisplayName.value,
+      password: elements.adminNewPassword.value,
+      role: elements.adminNewRole.value
+    })
+  });
+  state.auth.users = data.users || [];
+  elements.adminNewUsername.value = "";
+  elements.adminNewDisplayName.value = "";
+  elements.adminNewPassword.value = "";
+  renderAdminUsers();
+  showToast("새 계정을 생성했습니다.");
+}
+
+async function setUserActive(id, active) {
+  const data = await authApi("?action=set-active", {
+    method: "POST",
+    body: JSON.stringify({ id, active })
+  });
+  state.auth.users = data.users || [];
+  renderAdminUsers();
+}
+
 function addOrderHistory(group) {
   const stamp = new Date();
   state.orderHistory.unshift({
@@ -239,10 +436,36 @@ function showToast(message) {
   showToast.timer = setTimeout(() => elements.toast.classList.remove("show"), 1800);
 }
 
+function authHeaders() {
+  return {
+    "content-type": "application/json",
+    ...(state.auth.token ? { authorization: `Bearer ${state.auth.token}` } : {})
+  };
+}
+
+async function authApi(path = "", options = {}) {
+  const response = await fetch(`${AUTH_API_URL}${path}`, {
+    ...options,
+    headers: {
+      ...authHeaders(),
+      ...(options.headers || {})
+    }
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.error || "Auth API error");
+  }
+  return response.json();
+}
+
 async function api(path = "", options = {}) {
   const response = await fetch(`${API_URL}${path}`, {
-    headers: { "content-type": "application/json" },
-    ...options
+    ...options,
+    headers: {
+      ...authHeaders(),
+      ...(options.headers || {})
+    }
   });
 
   if (!response.ok) {
@@ -255,8 +478,11 @@ async function api(path = "", options = {}) {
 
 async function posApi(path = "", options = {}) {
   const response = await fetch(`${POS_API_URL}${path}`, {
-    headers: { "content-type": "application/json" },
-    ...options
+    ...options,
+    headers: {
+      ...authHeaders(),
+      ...(options.headers || {})
+    }
   });
 
   if (!response.ok) {
@@ -1897,6 +2123,18 @@ function showBidfoodOnly() {
 }
 
 function bindEvents() {
+  $("submitAuthBtn").addEventListener("click", () => submitAuth().catch((error) => {
+    elements.authMessage.textContent = error.message;
+  }));
+  $("authPassword").addEventListener("keydown", (event) => {
+    if (event.key === "Enter") submitAuth().catch((error) => {
+      elements.authMessage.textContent = error.message;
+    });
+  });
+  $("logoutBtn").addEventListener("click", () => logout().catch((error) => showToast(error.message)));
+  $("openAdminBtn").addEventListener("click", openAdminModal);
+  $("closeAdminBtn").addEventListener("click", closeAdminModal);
+  $("createUserBtn").addEventListener("click", () => createAdminUser().catch((error) => showToast(error.message)));
   $("refreshBtn").addEventListener("click", loadData);
   $("copyBtn").addEventListener("click", copyMessage);
   $("shareBtn").addEventListener("click", shareMessage);
@@ -1989,6 +2227,12 @@ function bindEvents() {
   elements.posDiscount.addEventListener("input", renderPosCart);
   elements.posEditProduct.addEventListener("change", syncPosEditForm);
 
+  elements.adminUserList.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-user-active]");
+    if (!button) return;
+    setUserActive(Number(button.dataset.userActive), button.dataset.active === "1").catch((error) => showToast(error.message));
+  });
+
   elements.orderHistoryList.addEventListener("click", async (event) => {
     const button = event.target.closest("[data-history-copy]");
     if (!button) return;
@@ -2006,6 +2250,10 @@ function bindEvents() {
     if (event.target === elements.posModal) closePos();
   });
 
+  elements.adminModal.addEventListener("click", (event) => {
+    if (event.target === elements.adminModal) closeAdminModal();
+  });
+
   elements.itemModal.addEventListener("click", (event) => {
     if (event.target === elements.itemModal) closeItemModal();
   });
@@ -2019,6 +2267,9 @@ function bindEvents() {
     }
     if (event.key === "Escape" && elements.itemModal.classList.contains("open")) {
       closeItemModal();
+    }
+    if (event.key === "Escape" && elements.adminModal.classList.contains("open")) {
+      closeAdminModal();
     }
   });
 
@@ -2084,5 +2335,16 @@ state.activities = readActivities();
 state.orderHistory = readOrderHistory();
 state.posHeldOrders = readPosHeldOrders();
 loadTheme();
-loadData();
-loadPosData();
+
+async function boot() {
+  applyAuthUi();
+  const ready = await loadAuth();
+  if (!ready) return;
+  await loadData();
+  await loadPosData();
+}
+
+boot().catch((error) => {
+  showToast(error.message);
+  openAuth("login");
+});

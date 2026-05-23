@@ -1,3 +1,5 @@
+import { AuthError, requireUser } from "../_shared/auth.js";
+
 const DEFAULT_DATA = [
   ["튀김 / 냉동", ["만두", 1], ["탬프라", 2], ["스프링롤", 0], ["타코야끼", 0], ["새우", 6], ["포크 돈까스", 1], ["프론 트위스트", 0], ["프론 슈마이", 1], ["피쉬", 0], ["핫도그", 0], ["손가락치킨", 1], ["크랩볼", 0], ["오징어", 1], ["스시 튀김", 0], ["라이스볼", 0]],
   ["스시 / 생선", ["연어 싸는거", 1], ["연어 니기리", 0], ["연어 파이어", 0], ["장어", 0], ["튜나 니기리", 0], ["씨위드", 0], ["수루미", 0], ["오뎅", 0], ["단새우", 0], ["유부", 0], ["차에 물고기 간장", 0]],
@@ -309,6 +311,7 @@ export async function onRequest({ request, env }) {
   try {
     await ensureSchema(env.DB);
     await ensureSeeded(env.DB);
+    await requireUser(env.DB, request);
 
     const url = new URL(request.url);
     const method = request.method.toUpperCase();
@@ -333,16 +336,19 @@ export async function onRequest({ request, env }) {
     }
 
     if (method === "POST" && url.searchParams.get("action") === "add-item") {
+      await requireUser(env.DB, request, ["admin"]);
       await addItem(env.DB, body);
       return json({ ok: true });
     }
 
     if (method === "POST" && url.searchParams.get("action") === "update-item") {
+      await requireUser(env.DB, request, ["admin"]);
       await updateItem(env.DB, body);
       return json({ ok: true });
     }
 
     if (method === "POST" && url.searchParams.get("action") === "hide-item") {
+      await requireUser(env.DB, request, ["admin"]);
       await hideItem(env.DB, body);
       return json({ ok: true });
     }
@@ -362,6 +368,7 @@ export async function onRequest({ request, env }) {
 
     return json({ error: "Not found" }, 404);
   } catch (error) {
+    if (error instanceof AuthError) return json({ error: error.message }, error.status);
     return json({ error: error.message || "Unknown error" }, 500);
   }
 }

@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "check": "node --check public/app.js && node --check functions/api/inventory.js && node scripts/validate.mjs",
+    "check": "node --check public/app.js && node --check functions/_shared/auth.js && node --check functions/api/auth.js && node --check functions/api/inventory.js && node --check functions/api/pos.js && node scripts/validate.mjs",
     "dev": "wrangler pages dev public --d1 DB=shop_inventory_ai",
     "db:create": "wrangler d1 create shop_inventory_ai",
     "db:migrate:local": "wrangler d1 execute shop_inventory_ai --local --file=./migrations/0001_initial.sql",

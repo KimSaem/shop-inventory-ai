@@ -17,6 +17,9 @@
         <p id="statusText">시스템 준비 중</p>
       </div>
       <div class="header-actions">
+        <span class="status-badge user-badge" id="userBadge">로그인 필요</span>
+        <button class="btn small admin-only" id="openAdminBtn" type="button">관리자</button>
+        <button class="btn small" id="logoutBtn" type="button">로그아웃</button>
         <span class="status-badge" id="connectionBadge">확인 중</span>
         <button class="icon-btn" id="refreshBtn" type="button" aria-label="새로고침" title="새로고침">↻</button>
       </div>
@@ -145,7 +148,7 @@
           <textarea id="messageOutput" readonly></textarea>
         </section>
 
-        <section class="panel">
+        <section class="panel admin-only">
           <h2>품목 추가</h2>
           <div class="add-form">
             <input id="newItemName" type="text" placeholder="새 품목 이름" />
@@ -166,6 +169,67 @@
   </nav>
 
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+  <section class="modal-backdrop open" id="authModal" aria-hidden="false">
+    <div class="auth-modal" role="dialog" aria-modal="true" aria-labelledby="authTitle">
+      <div class="modal-head">
+        <div>
+          <div class="eyebrow">Secure Store Access</div>
+          <h2 id="authTitle">로그인</h2>
+          <p id="authSubtitle">계정으로 로그인하면 POS와 재고 시스템을 사용할 수 있습니다.</p>
+        </div>
+      </div>
+      <div class="auth-form">
+        <input id="authUsername" type="text" autocomplete="username" placeholder="아이디" />
+        <input id="authDisplayName" type="text" autocomplete="name" placeholder="이름" />
+        <input id="authPassword" type="password" autocomplete="current-password" placeholder="비밀번호" />
+        <button class="btn success" id="submitAuthBtn" type="button">로그인</button>
+        <p id="authMessage" class="form-hint">처음 사용하는 경우 첫 계정이 관리자 계정이 됩니다.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="modal-backdrop" id="adminModal" aria-hidden="true">
+    <div class="admin-modal" role="dialog" aria-modal="true" aria-labelledby="adminModalTitle">
+      <div class="modal-head">
+        <div>
+          <div class="eyebrow">Admin Control Center</div>
+          <h2 id="adminModalTitle">관리자 모드</h2>
+          <p>직원 계정, 권한, 운영 접근을 관리합니다.</p>
+        </div>
+        <button class="icon-btn" id="closeAdminBtn" type="button" aria-label="닫기">×</button>
+      </div>
+      <div class="admin-grid">
+        <section class="panel">
+          <div class="panel-head">
+            <div>
+              <h2>직원 추가</h2>
+              <p>직원은 POS와 발주 운영을 사용할 수 있습니다.</p>
+            </div>
+          </div>
+          <div class="admin-form">
+            <input id="adminNewUsername" type="text" placeholder="직원 아이디" />
+            <input id="adminNewDisplayName" type="text" placeholder="직원 이름" />
+            <input id="adminNewPassword" type="password" placeholder="임시 비밀번호" />
+            <select id="adminNewRole">
+              <option value="staff">직원</option>
+              <option value="admin">관리자</option>
+            </select>
+            <button class="btn success" id="createUserBtn" type="button">계정 생성</button>
+          </div>
+        </section>
+        <section class="panel">
+          <div class="panel-head">
+            <div>
+              <h2>사용자 목록</h2>
+              <p>비활성화하면 즉시 로그인과 API 접근이 막힙니다.</p>
+            </div>
+          </div>
+          <div class="user-list" id="adminUserList"></div>
+        </section>
+      </div>
+    </div>
+  </section>
 
   <section class="modal-backdrop" id="posModal" aria-hidden="true">
     <div class="pos-modal" role="dialog" aria-modal="true" aria-labelledby="posModalTitle">
@@ -244,7 +308,7 @@
       </div>
 
       <div class="pos-insight-grid">
-        <section class="panel">
+        <section class="panel admin-only">
           <div class="panel-head">
             <div>
               <h2>영수증 미리보기</h2>
